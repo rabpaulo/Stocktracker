@@ -35,7 +35,7 @@ def get_info(acao):
         }
         return info
 
-def print_info(info, mode="simple"):
+def print_info(info, mode):
     if info is None:
         print(f"{Fore.RED}Error fetching data for {acao}{Fore.RESET}")
         return
@@ -72,7 +72,7 @@ if args.list:
     exit(0)
     
 # Printing mode
-mode = "simples" if args.simple else "detailed"
+mode = "simple" if args.simple else "detailed"
 
 # Find
 acao = None
