@@ -1,4 +1,4 @@
-##!/usr/bin/env python3
+#!/usr/bin/env python3
 # If you dont want to keep activating venv, change the shebang to:
 # !/path/to/your/venv/bin/python3
 
