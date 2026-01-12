@@ -4,7 +4,6 @@
 
 import yfinance as yf
 import argparse
-import matplotlib.pyplot as plt
 
 # Definir todas as flags possiveis
 parser = argparse.ArgumentParser(description="Stock Tracker")
@@ -52,6 +51,10 @@ def print_info(info, mode):
         print("-" * 20)
 
 def plot_price(data, ticker):
+    import matplotlib
+    matplotlib.use("TkAgg")
+    import matplotlib.pyplot as plt
+
     plt.figure(figsize=(10, 4))
     plt.plot(data.index, data['Close'], label='Preço de Fechamento')
     plt.title(f'Variação intradiária: {ticker}')
@@ -61,6 +64,14 @@ def plot_price(data, ticker):
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
+def formatar(ativo):
+    ativo = ativo.strip().upper()
+    if "-" in ativo:
+        return ativo
+    if ativo.endswith(".SA"):
+        return ativo
+    return f"{ativo}.SA"
 
 def print_stocks():
     for ativo in ativos:
@@ -81,7 +92,7 @@ if args.find is True:
 elif args.find:
     ativo = args.find
 if ativo: 
-    ativo = ativo.upper() + ".SA" if not ativo.endswith(".SA") else ativo
+    ativo = formatar(ativo)
     print_info(get_info(ativo), mode)
     exit(0)
 
@@ -91,7 +102,7 @@ if args.plot is True:
 elif args.plot:
     ativo = args.plot
 if ativo:
-    ativo = ativo.upper() + ".SA" if not ativo.endswith(".SA") else ativo
+    ativo = formatar(ativo)
     info = get_info(ativo)
     if info:
         plot_price(info['raw_data'], ativo)
