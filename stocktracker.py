@@ -4,7 +4,6 @@
 
 import yfinance as yf
 import argparse
-from colorama import Fore
 import matplotlib.pyplot as plt
 
 # Definir todas as flags possiveis
@@ -15,14 +14,14 @@ parser.add_argument('-f', '--find', nargs='?', const=True, help='Search for spec
 parser.add_argument('-p', '--plot', nargs='?', const=True, help='Generate a plot for the stock')
 args = parser.parse_args()
 
-acoes = [
-    "PETR3.SA",
+ativos = [
     "PETR4.SA",
-    "WEGE3.SA"
+    "BBAS3.SA",
+    "BTC-USD"
 ]
 
-def get_info(acao):
-    data = yf.Ticker(acao).history(period="1d", interval="1m")
+def get_info(ativo):
+    data = yf.Ticker(ativo).history(period="1d", interval="1m")
     if not data.empty:
         info = {
             "current": data['Close'].iloc[-1],
@@ -37,13 +36,13 @@ def get_info(acao):
 
 def print_info(info, mode):
     if info is None:
-        print(f"{Fore.RED}Error fetching data for {acao}{Fore.RESET}")
+        print(f"Error fetching data for {ativo}")
         return
 
     if mode == "simple":
-        print(f"{Fore.CYAN}{acao.upper()}{Fore.RESET}: {info['current']:.2f} ")
-    elif mode == "detailed":
-        print(f"{Fore.CYAN}Ticker{Fore.RESET}: {acao.upper()}")
+        print(f"{ativo.upper().split('.')[0]}: {info['current']:.2f} ")
+    else:
+        print(f"Ticker: {ativo.upper()}")
         print(f"Current Price: {info['current']:.2f}")
         print(f"Open Price: {info['open']:.2f}")
         print(f"24h High: {info['high_24h']:.2f}")
@@ -64,8 +63,8 @@ def plot_price(data, ticker):
     plt.show()
 
 def print_stocks():
-    for acao in acoes:
-        print(acao)
+    for ativo in ativos:
+        print(ativo)
 # List
 if args.list:
     print_stocks()
@@ -75,27 +74,27 @@ if args.list:
 mode = "simple" if args.simple else "detailed"
 
 # Find
-acao = None
+ativo = None
 
 if args.find is True:
-    acao = input("Enter the stock ticker: ")
+    ativo = input("Enter the stock ticker: ")
 elif args.find:
-    acao = args.find
-if acao: 
-    acao = acao.upper() + ".SA" if not acao.endswith(".SA") else acao
-    print_info(get_info(acao), mode)
+    ativo = args.find
+if ativo: 
+    ativo = ativo.upper() + ".SA" if not ativo.endswith(".SA") else ativo
+    print_info(get_info(ativo), mode)
     exit(0)
 
 # Plot
 if args.plot is True:
-    acao = input("Enter stock to generate the plot: ")
+    ativo = input("Enter stock to generate the plot: ")
 elif args.plot:
-    acao = args.plot
-if acao:
-    acao = acao.upper() + ".SA" if not acao.endswith(".SA") else acao
-    info = get_info(acao)
+    ativo = args.plot
+if ativo:
+    ativo = ativo.upper() + ".SA" if not ativo.endswith(".SA") else ativo
+    info = get_info(ativo)
     if info:
-        plot_price(info['raw_data'], acao)
+        plot_price(info['raw_data'], ativo)
     exit(0)
-for acao in acoes:
-    print_info(get_info(acao), mode)
+for ativo in ativos:
+    print_info(get_info(ativo), mode)

@@ -1,5 +1,5 @@
 # StockTracker
-Simple python script to track stock prices using the Yahoo Finance API.
+Simple python script to track price of assets using the Yahoo Finance API.
 
 ## Requirements
 yfinance
