@@ -1,19 +1,29 @@
 # StockTracker
-Simple python script to track price of assets using the Yahoo Finance API.
 
-## Requirements
-yfinance
-colorama
-plotext
+Simple Python CLI for tracking stocks and cryptocurrencies with data from Yahoo
+Finance.
+
+## Features
+
+- Display a detailed or compact portfolio summary.
+- Search for a specific ticker.
+- Render a compact price chart directly in the terminal.
+- Use the terminal's default foreground and background colors.
+- Select data ranges of one day, week, month, or year.
+- Display the Period Time High (PTH) and Period Time Low (PTL) in the chart
+  title.
 
 ## Installation
-```
+
+```bash
 git clone https://github.com/rabpaulo/Stocktracker
 cd Stocktracker
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
-# Usage
-```
+
+## Usage
+
+```text
 usage: stocktracker.py [-h] [-s] [-l] [-f [FIND]] [-p [PLOT]]
                        [-t {1d,1w,1m,1y}]
 
@@ -27,14 +37,54 @@ options:
                         Time range for stock data (default: 1d)
 ```
 
-Generate an intraday price plot directly in the terminal:
+Display the default portfolio:
 
+```bash
+./stocktracker.py
 ```
+
+Display only current prices:
+
+```bash
+./stocktracker.py --simple
+```
+
+Find a specific asset:
+
+```bash
+./stocktracker.py --find PETR4
+./stocktracker.py --find BTC-USD
+```
+
+Generate a compact terminal chart:
+
+```bash
 ./stocktracker.py --plot PETR4
-```
-
-Choose between one day, one week, one month, and one year:
-
-```
 ./stocktracker.py --plot PETR4 --time 1m
+./stocktracker.py -p BTC-USD -t 1y
 ```
+
+Brazilian stock tickers automatically receive the `.SA` suffix when omitted.
+Tickers containing a hyphen, such as `BTC-USD`, are preserved.
+
+## Time ranges
+
+| Value | Range | Data interval |
+| --- | --- | --- |
+| `1d` | One day | One minute |
+| `1w` | One week | Thirty minutes |
+| `1m` | One month | One day |
+| `1y` | One year | One week |
+
+The default range is `1d`. In this CLI, `1m` means one month.
+
+## Chart indicators
+
+The chart title includes the selected ticker, range, and price extremes:
+
+```text
+PETR4.SA (1m) | PTH 42.10 | PTL 35.72
+```
+
+- **PTH (Period Time High):** highest `High` price in the selected range.
+- **PTL (Period Time Low):** lowest `Low` price in the selected range.
