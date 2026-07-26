@@ -232,7 +232,7 @@ class TickerListItem(ListItem):
         self.ticker = ticker
         label = Text()
         label.append(short_ticker(ticker), style="bold")
-        label.append(f"\n{market_name(ticker)}", style="#64748b")
+        label.append(f"\n{market_name(ticker)}", style="dim")
         super().__init__(Static(label))
 
 
@@ -254,27 +254,42 @@ class PriceChart(Static):
 
     def render(self) -> Group | Text:
         if self.loading:
-            return Text("Loading price history…", style="italic #64748b")
+            return Text("Loading price history…", style="italic dim")
         if self.snapshot is None:
-            return Text("Price history is unavailable.", style="italic #64748b")
+            return Text(
+                "Price history is unavailable.",
+                style="italic dim",
+            )
 
         snapshot = self.snapshot
         width = max(4, self.size.width - 4)
         height = max(2, self.size.height - 5)
         chart_rows = render_area_chart(snapshot.prices, width, height)
-        color = "#22c55e" if snapshot.change >= 0 else "#f43f5e"
+        color = "green" if snapshot.change >= 0 else "red"
 
         scale = Text(no_wrap=True, overflow="crop")
-        scale.append(f"HIGH  {format_price(snapshot.ticker, snapshot.high)}", style="bold #94a3b8")
+        scale.append(
+            f"HIGH  {format_price(snapshot.ticker, snapshot.high)}",
+            style="bold dim",
+        )
         scale.append(" " * 4)
-        scale.append(f"LOW  {format_price(snapshot.ticker, snapshot.low)}", style="bold #94a3b8")
+        scale.append(
+            f"LOW  {format_price(snapshot.ticker, snapshot.low)}",
+            style="bold dim",
+        )
         lines: list[Text] = [scale]
         lines.extend(Text(row, style=color, no_wrap=True, overflow="crop") for row in chart_rows)
 
         caption = Text(no_wrap=True, overflow="crop")
-        caption.append(TIME_RANGES[snapshot.period].description, style="#64748b")
+        caption.append(
+            TIME_RANGES[snapshot.period].description,
+            style="dim",
+        )
         caption.append("  ·  ")
-        caption.append(f"{len(snapshot.prices):,} points", style="#94a3b8")
+        caption.append(
+            f"{len(snapshot.prices):,} points",
+            style="dim",
+        )
         lines.append(caption)
         return Group(*lines)
 
@@ -298,18 +313,44 @@ class StockTrackerApp(App[None]):
 
     CSS = """
     Screen {
-        background: #080d18;
-        color: #dbe5f4;
+        background: ansi_default;
+        color: ansi_default;
     }
 
     Header {
-        background: #0f172a;
-        color: #e2e8f0;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    HeaderIcon:hover {
+        background: ansi_default;
+        text-style: reverse;
     }
 
     Footer {
-        background: #0f172a;
-        color: #94a3b8;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    FooterKey {
+        background: ansi_default;
+        color: ansi_default;
+
+        .footer-key--key {
+            background: ansi_default;
+            color: ansi_cyan;
+        }
+
+        .footer-key--description {
+            background: ansi_default;
+            color: ansi_default;
+        }
+
+        &:hover {
+            background: ansi_default;
+            color: ansi_default;
+            text-style: reverse;
+        }
     }
 
     #shell {
@@ -319,15 +360,15 @@ class StockTrackerApp(App[None]):
     #toolbar {
         height: 5;
         padding: 1 2;
-        background: #0b1220;
-        border-bottom: solid #1e293b;
+        background: ansi_default;
+        border-bottom: solid ansi_bright_black;
     }
 
     #brand {
         width: 20;
         height: 3;
         content-align: left middle;
-        color: #38bdf8;
+        color: ansi_cyan;
         text-style: bold;
     }
 
@@ -336,12 +377,13 @@ class StockTrackerApp(App[None]):
         max-width: 46;
         height: 3;
         margin-right: 2;
-        border: tall #334155;
-        background: #111827;
+        border: tall ansi_bright_black;
+        background: ansi_default;
+        color: ansi_default;
     }
 
     #search:focus {
-        border: tall #38bdf8;
+        border: tall ansi_cyan;
     }
 
     .period-button {
@@ -349,22 +391,25 @@ class StockTrackerApp(App[None]):
         min-width: 5;
         height: 3;
         margin-right: 1;
-        background: #111827;
-        color: #94a3b8;
+        background: ansi_default;
+        color: ansi_default;
+        border: tall ansi_bright_black;
     }
 
     .period-button.active-period {
-        background: #075985;
-        color: #f0f9ff;
-        text-style: bold;
+        background: ansi_default;
+        color: ansi_default;
+        border: tall ansi_cyan;
+        text-style: bold reverse;
     }
 
     #refresh-button {
         width: 12;
         min-width: 10;
         height: 3;
-        background: #164e63;
-        color: #ecfeff;
+        background: ansi_default;
+        color: ansi_cyan;
+        border: tall ansi_cyan;
     }
 
     #content {
@@ -374,69 +419,73 @@ class StockTrackerApp(App[None]):
     #sidebar {
         width: 27;
         min-width: 21;
-        background: #0b1220;
-        border-right: solid #1e293b;
+        background: ansi_default;
+        border-right: solid ansi_bright_black;
     }
 
     #watchlist-title {
         height: 3;
         padding: 1 2 0 2;
-        color: #64748b;
+        color: ansi_default;
         text-style: bold;
     }
 
     #ticker-list {
         height: 1fr;
         padding: 0 1;
-        background: #0b1220;
-        scrollbar-color: #334155;
-        scrollbar-background: #0b1220;
+        background: ansi_default;
+        scrollbar-color: ansi_bright_black;
+        scrollbar-background: ansi_default;
     }
 
     TickerListItem {
         height: 4;
         padding: 1 1;
         margin-bottom: 1;
-        color: #cbd5e1;
-        background: #111827;
+        color: ansi_default;
+        background: ansi_default;
         border-left: thick transparent;
     }
 
     TickerListItem:hover {
-        background: #172033;
-        border-left: thick #475569;
+        background: ansi_default;
+        border-left: thick ansi_bright_black;
+        text-style: underline;
     }
 
     TickerListItem.-highlight {
-        background: #0c4a6e;
-        color: #f0f9ff;
-        border-left: thick #38bdf8;
+        background: ansi_default;
+        color: ansi_default;
+        border-left: thick ansi_cyan;
+        text-style: bold reverse;
     }
 
     #watchlist-help {
         height: 4;
         padding: 1 2;
-        color: #475569;
+        color: ansi_default;
+        text-opacity: 55%;
     }
 
     #dashboard {
         width: 1fr;
         height: 1fr;
         padding: 1 2 2 2;
-        scrollbar-color: #334155;
-        scrollbar-background: #080d18;
+        scrollbar-color: ansi_bright_black;
+        scrollbar-background: ansi_default;
     }
 
     #status {
         height: 2;
-        color: #64748b;
+        color: ansi_default;
+        text-opacity: 65%;
     }
 
     #summary {
         height: 7;
         margin-bottom: 1;
-        background: #0f172a;
-        border: solid #1e293b;
+        background: ansi_default;
+        border: solid ansi_bright_black;
     }
 
     #identity {
@@ -462,8 +511,8 @@ class StockTrackerApp(App[None]):
         height: 7;
         margin-right: 1;
         padding: 1 2;
-        background: #0f172a;
-        border: solid #1e293b;
+        background: ansi_default;
+        border: solid ansi_bright_black;
         content-align: left middle;
     }
 
@@ -475,8 +524,8 @@ class StockTrackerApp(App[None]):
         height: 1fr;
         min-height: 12;
         padding: 1 2;
-        background: #0f172a;
-        border: solid #1e293b;
+        background: ansi_default;
+        border: solid ansi_bright_black;
     }
     """
 
@@ -486,7 +535,9 @@ class StockTrackerApp(App[None]):
         period: str = "1d",
         service: StockService | None = None,
     ) -> None:
-        super().__init__()
+        # Preserve the user's terminal-defined ANSI palette instead of
+        # converting ANSI colors to Textual's built-in truecolor theme.
+        super().__init__(ansi_color=True)
         if period not in TIME_RANGES:
             raise ValueError(f"Unknown period: {period}")
         normalized = list(dict.fromkeys(normalize_ticker(ticker) for ticker in tickers))
@@ -541,20 +592,29 @@ class StockTrackerApp(App[None]):
 
     def _metric(self, label: str, value: str) -> Text:
         text = Text()
-        text.append(label.upper(), style="bold #64748b")
-        text.append(f"\n{value}", style="bold #e2e8f0")
+        text.append(label.upper(), style="bold dim")
+        text.append(f"\n{value}", style="bold")
         return text
 
     def _render_snapshot(self, snapshot: StockSnapshot) -> None:
         identity = Text()
-        identity.append(short_ticker(snapshot.ticker), style="bold #f8fafc")
-        identity.append(f"\n{snapshot.ticker}  ·  {market_name(snapshot.ticker)}", style="#64748b")
+        identity.append(
+            short_ticker(snapshot.ticker),
+            style="bold",
+        )
+        identity.append(
+            f"\n{snapshot.ticker}  ·  {market_name(snapshot.ticker)}",
+            style="dim",
+        )
         self.query_one("#identity", Static).update(identity)
 
         direction = "+" if snapshot.change >= 0 else ""
-        color = "#22c55e" if snapshot.change >= 0 else "#f43f5e"
+        color = "green" if snapshot.change >= 0 else "red"
         quote = Text(justify="right")
-        quote.append(format_price(snapshot.ticker, snapshot.current), style="bold #f8fafc")
+        quote.append(
+            format_price(snapshot.ticker, snapshot.current),
+            style="bold",
+        )
         quote.append(
             f"\n{direction}{snapshot.change:,.2f}  "
             f"({direction}{snapshot.change_percent:.2f}%)",
@@ -575,10 +635,19 @@ class StockTrackerApp(App[None]):
     def _render_loading_shell(self) -> None:
         ticker = self.current_ticker
         identity = Text()
-        identity.append(short_ticker(ticker), style="bold #f8fafc")
-        identity.append(f"\n{ticker}  ·  {market_name(ticker)}", style="#64748b")
+        identity.append(short_ticker(ticker), style="bold")
+        identity.append(
+            f"\n{ticker}  ·  {market_name(ticker)}",
+            style="dim",
+        )
         self.query_one("#identity", Static).update(identity)
-        self.query_one("#quote", Static).update(Text("—\nLoading…", justify="right", style="#64748b"))
+        self.query_one("#quote", Static).update(
+            Text(
+                "—\nLoading…",
+                justify="right",
+                style="dim",
+            )
+        )
         for widget_id, label in (
             ("#metric-open", "Period open"),
             ("#metric-high", "Period high"),
@@ -588,7 +657,7 @@ class StockTrackerApp(App[None]):
         self.query_one("#price-chart", PriceChart).show_loading()
 
     def _set_status(self, message: str, *, error: bool = False) -> None:
-        style = "bold #f43f5e" if error else "#64748b"
+        style = "bold red" if error else "dim"
         self.query_one("#status", Static).update(Text(message, style=style))
 
     def _sync_period_buttons(self) -> None:

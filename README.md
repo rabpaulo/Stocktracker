@@ -13,6 +13,7 @@ controls with the mouse, or scroll the dashboard without leaving the terminal.
 - Cached views for instant navigation
 - Background refreshes that do not freeze the interface
 - Clear loading and data-provider error states
+- Colors inherited from your terminal's active ANSI palette
 
 ## Installation
 
@@ -75,3 +76,8 @@ In StockTracker, `1m` means one month.
 Quotes are supplied by Yahoo Finance through `yfinance` and may be delayed.
 Previously loaded ticker/period combinations are cached for fast switching.
 Press `r` or click **Reload** to request fresh data.
+
+The interface uses your terminal's default foreground and background plus its
+configured ANSI accent, success, and error colors. Changing your terminal color
+scheme therefore changes StockTracker with it. When the `NO_COLOR` environment
+variable is set, StockTracker renders in monochrome.

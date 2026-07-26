@@ -14,6 +14,11 @@ from stocktracker import (
 
 
 class HelperTests(unittest.TestCase):
+    def test_app_preserves_the_terminal_ansi_palette(self) -> None:
+        app = StockTrackerApp(service=FakeStockService())
+        self.assertTrue(app.ansi_color)
+        self.assertNotRegex(app.CSS, r"#[0-9a-fA-F]{3,8}")
+
     def test_normalizes_brazilian_and_yahoo_tickers(self) -> None:
         self.assertEqual(normalize_ticker(" petr4 "), "PETR4.SA")
         self.assertEqual(normalize_ticker("bova11"), "BOVA11.SA")
