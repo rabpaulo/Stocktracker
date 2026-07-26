@@ -1,3 +1,2 @@
-yfinance
-colorama
-plotext
+textual>=8.2,<9
+yfinance>=1,<2

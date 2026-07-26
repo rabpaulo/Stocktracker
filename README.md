@@ -1,90 +1,77 @@
 # StockTracker
 
-Simple Python CLI for tracking stocks and cryptocurrencies with data from Yahoo
-Finance.
+StockTracker is an interactive terminal dashboard for stocks, crypto, and market
+indexes using data from Yahoo Finance. It is a full TUI: use the keyboard, click
+controls with the mouse, or scroll the dashboard without leaving the terminal.
 
-## Features
+## What it shows
 
-- Display a detailed or compact portfolio summary.
-- Search for a specific ticker.
-- Render a compact price chart directly in the terminal.
-- Use the terminal's default foreground and background colors.
-- Select data ranges of one day, week, month, or year.
-- Display the Period Time High (PTH) and Period Time Low (PTL) in the chart
-  title.
+- A clickable watchlist
+- Current price and period change
+- Period open, high, and low
+- A responsive terminal-native price chart
+- Cached views for instant navigation
+- Background refreshes that do not freeze the interface
+- Clear loading and data-provider error states
 
 ## Installation
 
 ```bash
 git clone https://github.com/rabpaulo/Stocktracker
 cd Stocktracker
+python3 -m venv .venv
+source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-## Usage
+## Run
 
-```text
-usage: stocktracker.py [-h] [-s] [-l] [-f [FIND]] [-p [PLOT]]
-                       [-t {1d,1w,1m,1y}]
-
-options:
-  -h, --help            show this help message and exit
-  -s, --simple          Simple printing mode
-  -l, --list            List all stocks in the portfolio
-  -f, --find [FIND]     Search for specific stock
-  -p, --plot [PLOT]     Generate a CLI plot for the stock
-  -t, --time {1d,1w,1m,1y}
-                        Time range for stock data (default: 1d)
-```
-
-Display the default portfolio:
+Open the default watchlist:
 
 ```bash
 ./stocktracker.py
 ```
 
-Display only current prices:
+Start with a custom watchlist or period:
 
 ```bash
-./stocktracker.py --simple
+./stocktracker.py AAPL MSFT BTC-USD
+./stocktracker.py PETR4 BBAS3 -t 1m
 ```
 
-Find a specific asset:
+Brazilian stock symbols such as `PETR4` and `BOVA11` automatically receive the
+`.SA` suffix. Yahoo symbols that already contain a suffix or separator, such as
+`BTC-USD`, `^BVSP`, and `VALE3.SA`, are preserved.
 
-```bash
-./stocktracker.py --find PETR4
-./stocktracker.py --find BTC-USD
-```
+## Controls
 
-Generate a compact terminal chart:
+| Input | Action |
+| --- | --- |
+| Mouse click | Select a ticker, period, search field, or reload button |
+| Mouse wheel | Scroll the dashboard or watchlist |
+| `j` / `k` | Select the next / previous ticker |
+| `l` / `h` | Select the next / previous period |
+| `/` | Focus ticker search |
+| `Enter` | Open the ticker entered in search |
+| `r` | Reload the selected ticker and period |
+| `Esc` | Leave search and return to the watchlist |
+| `q` | Quit |
 
-```bash
-./stocktracker.py --plot PETR4
-./stocktracker.py --plot PETR4 --time 1m
-./stocktracker.py -p BTC-USD -t 1y
-```
+The footer is also clickable in terminals with mouse reporting enabled.
 
-Brazilian stock tickers automatically receive the `.SA` suffix when omitted.
-Tickers containing a hyphen, such as `BTC-USD`, are preserved.
+## Periods
 
-## Time ranges
-
-| Value | Range | Data interval |
+| Key | Range | Yahoo Finance interval |
 | --- | --- | --- |
-| `1d` | One day | One minute |
-| `1w` | One week | Thirty minutes |
+| `1d` | One trading day | One minute |
+| `1w` | Seven days | Thirty minutes |
 | `1m` | One month | One day |
 | `1y` | One year | One week |
 
-The default range is `1d`. In this CLI, `1m` means one month.
+In StockTracker, `1m` means one month.
 
-## Chart indicators
+## Notes
 
-The chart title includes the selected ticker, range, and price extremes:
-
-```text
-PETR4.SA (1m) | PTH 42.10 | PTL 35.72
-```
-
-- **PTH (Period Time High):** highest `High` price in the selected range.
-- **PTL (Period Time Low):** lowest `Low` price in the selected range.
+Quotes are supplied by Yahoo Finance through `yfinance` and may be delayed.
+Previously loaded ticker/period combinations are cached for fast switching.
+Press `r` or click **Reload** to request fresh data.
