@@ -35,6 +35,7 @@ TIME_RANGES: dict[str, TimeRange] = {
     "1w": TimeRange("7d", "30m", "1W", "Past week"),
     "1m": TimeRange("1mo", "1d", "1M", "Past month"),
     "1y": TimeRange("1y", "1wk", "1Y", "Past year"),
+    "all": TimeRange("max", "1mo", "ALL", "All available history"),
 }
 PERIOD_KEYS = tuple(TIME_RANGES)
 DEFAULT_TICKERS = ("PETR4.SA", "BBAS3.SA", "BTC-USD")
@@ -365,7 +366,7 @@ class StockTrackerApp(App[None]):
     }
 
     #brand {
-        width: 20;
+        width: 18;
         height: 3;
         content-align: left middle;
         color: ansi_cyan;
@@ -374,7 +375,8 @@ class StockTrackerApp(App[None]):
 
     #search {
         width: 1fr;
-        max-width: 46;
+        min-width: 24;
+        max-width: 36;
         height: 3;
         margin-right: 2;
         border: tall ansi_bright_black;
@@ -404,7 +406,7 @@ class StockTrackerApp(App[None]):
     }
 
     #refresh-button {
-        width: 12;
+        width: 10;
         min-width: 10;
         height: 3;
         background: ansi_default;

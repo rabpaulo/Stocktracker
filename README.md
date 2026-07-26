@@ -4,6 +4,16 @@ StockTracker is an interactive terminal dashboard for stocks, crypto, and market
 indexes using data from Yahoo Finance. It is a full TUI: use the keyboard, click
 controls with the mouse, or scroll the dashboard without leaving the terminal.
 
+## Screenshots
+
+### PETR4 · One day
+
+![StockTracker showing PETR4 market data for one day](examples/stocktracker-petr4-1d.png)
+
+### BTC-USD · One month
+
+![StockTracker showing Bitcoin market data for one month](examples/stocktracker-btc-usd-1m.png)
+
 ## What it shows
 
 - A clickable watchlist
@@ -68,6 +78,7 @@ The footer is also clickable in terminals with mouse reporting enabled.
 | `1w` | Seven days | Thirty minutes |
 | `1m` | One month | One day |
 | `1y` | One year | One week |
+| `all` | All available history | One month |
 
 In StockTracker, `1m` means one month.
 

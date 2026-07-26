@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime
 
 from stocktracker import (
+    TIME_RANGES,
     StockSnapshot,
     StockTrackerApp,
     format_price,
@@ -18,6 +19,11 @@ class HelperTests(unittest.TestCase):
         app = StockTrackerApp(service=FakeStockService())
         self.assertTrue(app.ansi_color)
         self.assertNotRegex(app.CSS, r"#[0-9a-fA-F]{3,8}")
+
+    def test_all_period_requests_complete_monthly_history(self) -> None:
+        self.assertEqual(TIME_RANGES["all"].period, "max")
+        self.assertEqual(TIME_RANGES["all"].interval, "1mo")
+        self.assertEqual(TIME_RANGES["all"].label, "ALL")
 
     def test_normalizes_brazilian_and_yahoo_tickers(self) -> None:
         self.assertEqual(normalize_ticker(" petr4 "), "PETR4.SA")
@@ -97,6 +103,10 @@ class AppInteractionTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(pilot)
             self.assertEqual(app.current_period, "1w")
 
+            await pilot.press("h", "h")
+            await self.settle(pilot)
+            self.assertEqual(app.current_period, "all")
+
             await pilot.press("/")
             # A symbol containing j verifies watchlist bindings don't steal
             # printable characters while the search input is focused.
@@ -121,9 +131,9 @@ class AppInteractionTests(unittest.IsolatedAsyncioTestCase):
             await self.settle(pilot)
             self.assertEqual(app.current_ticker, "BBAS3.SA")
 
-            await pilot.click("#period-1m")
+            await pilot.click("#period-all")
             await self.settle(pilot)
-            self.assertEqual(app.current_period, "1m")
+            self.assertEqual(app.current_period, "all")
 
             calls_before_reload = len(service.calls)
             await pilot.click("#refresh-button")
