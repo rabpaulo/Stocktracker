@@ -11,11 +11,11 @@ in both PNG and SVG formats.
 
 ### PETR4 · One day
 
-![StockTracker showing PETR4 market data for one day](screenshots/stocktracker-petr4-1d.png)
+![StockTracker showing PETR4 market data for one week](screenshots/petr41w.png)
 
 ### BTC-USD · One month
 
-![StockTracker showing Bitcoin market data for one month](screenshots/stocktracker-btc-usd-1m.png)
+![StockTracker showing Bitcoin market data for one month](screenshots/BTC1m.png)
 
 ## What it shows
 
