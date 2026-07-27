@@ -28,14 +28,15 @@ class TimeRange:
     interval: str
     label: str
     description: str
+    axis_format: str
 
 
 TIME_RANGES: dict[str, TimeRange] = {
-    "1d": TimeRange("1d", "1m", "1D", "Today"),
-    "1w": TimeRange("7d", "30m", "1W", "Past week"),
-    "1m": TimeRange("1mo", "1d", "1M", "Past month"),
-    "1y": TimeRange("1y", "1wk", "1Y", "Past year"),
-    "all": TimeRange("max", "1mo", "ALL", "All available history"),
+    "1d": TimeRange("1d", "1m", "1D", "Today", "%H:%M"),
+    "1w": TimeRange("7d", "30m", "1W", "Past week", "%d %b"),
+    "1m": TimeRange("1mo", "1d", "1M", "Past month", "%d %b"),
+    "1y": TimeRange("1y", "1wk", "1Y", "Past year", "%b %Y"),
+    "all": TimeRange("max", "1mo", "ALL", "All available history", "%Y"),
 }
 PERIOD_KEYS = tuple(TIME_RANGES)
 DEFAULT_TICKERS = ("PETR4.SA", "BBAS3.SA", "BTC-USD")
@@ -57,6 +58,7 @@ class StockSnapshot:
     change: float
     change_percent: float
     prices: tuple[float, ...]
+    timestamps: tuple[datetime, ...]
     fetched_at: datetime
 
 
@@ -134,24 +136,57 @@ def sample_series(values: Sequence[float], width: int) -> tuple[float, ...]:
     return tuple(float(values[round(column * last / (width - 1))]) for column in range(width))
 
 
+def fit_series(values: Sequence[float], width: int) -> tuple[float, ...]:
+    """Fit a series to exactly ``width`` columns, interpolating when needed."""
+
+    sampled = sample_series(values, width)
+    if not sampled or len(sampled) == width:
+        return sampled
+    if len(sampled) == 1:
+        return sampled * width
+
+    last = len(sampled) - 1
+    fitted: list[float] = []
+    for column in range(width):
+        position = column * last / (width - 1)
+        left = math.floor(position)
+        right = math.ceil(position)
+        fraction = position - left
+        fitted.append(
+            sampled[left] + (sampled[right] - sampled[left]) * fraction
+        )
+    return tuple(fitted)
+
+
 def render_area_chart(
-    values: Sequence[float], width: int, height: int
+    values: Sequence[float],
+    width: int,
+    height: int,
+    *,
+    lower_bound: float | None = None,
+    upper_bound: float | None = None,
 ) -> tuple[str, ...]:
     """Render a compact, filled chart using one-eighth Unicode blocks."""
 
-    sampled = sample_series(values, width)
+    sampled = fit_series(values, width)
     if not sampled or height <= 0:
         return ()
 
-    floor = min(sampled)
-    ceiling = max(sampled)
+    floor = min(sampled) if lower_bound is None else lower_bound
+    ceiling = max(sampled) if upper_bound is None else upper_bound
+    if not math.isfinite(floor) or not math.isfinite(ceiling) or floor > ceiling:
+        floor, ceiling = min(sampled), max(sampled)
     span = ceiling - floor
     cells = height * 8
     if math.isclose(span, 0.0):
         levels = [max(1, cells // 2)] * len(sampled)
     else:
         levels = [
-            1 + round(((value - floor) / span) * (cells - 1))
+            1
+            + round(
+                min(1.0, max(0.0, (value - floor) / span))
+                * (cells - 1)
+            )
             for value in sampled
         ]
 
@@ -162,6 +197,46 @@ def render_area_chart(
             "".join(BLOCKS[min(8, max(0, level - row_floor))] for level in levels)
         )
     return tuple(rows)
+
+
+def format_x_axis(
+    timestamps: Sequence[datetime],
+    period: str,
+    width: int,
+) -> str:
+    """Position start, midpoint, and end dates across an axis."""
+
+    if width <= 0:
+        return ""
+    if not timestamps:
+        return " " * width
+
+    date_format = TIME_RANGES[period].axis_format
+    candidates = (
+        (timestamps[0].strftime(date_format), 0),
+        (timestamps[-1].strftime(date_format), width),
+        (
+            timestamps[len(timestamps) // 2].strftime(date_format),
+            width // 2,
+        ),
+    )
+    canvas = [" "] * width
+    occupied = [False] * width
+    for index, (label, anchor) in enumerate(candidates):
+        label = label[:width]
+        if index == 0:
+            start = 0
+        elif index == 1:
+            start = width - len(label)
+        else:
+            start = max(0, min(width - len(label), anchor - len(label) // 2))
+        cells = range(start, start + len(label))
+        if any(occupied[cell] for cell in cells):
+            continue
+        for cell, character in zip(cells, label):
+            canvas[cell] = character
+            occupied[cell] = True
+    return "".join(canvas)
 
 
 class StockService:
@@ -185,11 +260,18 @@ class StockService:
             missing = ", ".join(sorted(missing_columns))
             raise LookupError(f"Yahoo Finance omitted required fields: {missing}.")
 
-        closes = tuple(
-            float(value)
-            for value in data["Close"].dropna().tolist()
-            if math.isfinite(float(value))
-        )
+        close_points: list[tuple[datetime, float]] = []
+        for timestamp, value in data["Close"].dropna().items():
+            price = float(value)
+            if not math.isfinite(price):
+                continue
+            if hasattr(timestamp, "to_pydatetime"):
+                timestamp = timestamp.to_pydatetime()
+            if not isinstance(timestamp, datetime):
+                timestamp = datetime.fromisoformat(str(timestamp))
+            close_points.append((timestamp, price))
+        timestamps = tuple(timestamp for timestamp, _ in close_points)
+        closes = tuple(price for _, price in close_points)
         opens = tuple(
             float(value)
             for value in data["Open"].dropna().tolist()
@@ -222,6 +304,7 @@ class StockService:
             change=change,
             change_percent=change_percent,
             prices=closes,
+            timestamps=timestamps,
             fetched_at=datetime.now().astimezone(),
         )
 
@@ -263,32 +346,69 @@ class PriceChart(Static):
             )
 
         snapshot = self.snapshot
-        width = max(4, self.size.width - 4)
-        height = max(2, self.size.height - 5)
-        chart_rows = render_area_chart(snapshot.prices, width, height)
+        available_width = max(20, self.size.width - 4)
+        price_ticks = (
+            format_price(snapshot.ticker, snapshot.high),
+            format_price(
+                snapshot.ticker,
+                snapshot.low + (snapshot.high - snapshot.low) / 2,
+            ),
+            format_price(snapshot.ticker, snapshot.low),
+        )
+        label_width = min(18, max(len(label) for label in price_ticks))
+        plot_width = max(8, available_width - label_width - 2)
+        graph_height = max(3, self.size.height - 7)
+        chart_rows = render_area_chart(
+            snapshot.prices,
+            plot_width,
+            graph_height,
+            lower_bound=snapshot.low,
+            upper_bound=snapshot.high,
+        )
         color = "green" if snapshot.change >= 0 else "red"
 
-        scale = Text(no_wrap=True, overflow="crop")
-        scale.append(
-            f"HIGH  {format_price(snapshot.ticker, snapshot.high)}",
-            style="bold dim",
-        )
-        scale.append(" " * 4)
-        scale.append(
-            f"LOW  {format_price(snapshot.ticker, snapshot.low)}",
-            style="bold dim",
-        )
-        lines: list[Text] = [scale]
-        lines.extend(Text(row, style=color, no_wrap=True, overflow="crop") for row in chart_rows)
-
-        caption = Text(no_wrap=True, overflow="crop")
-        caption.append(
-            TIME_RANGES[snapshot.period].description,
+        heading = Text(no_wrap=True, overflow="crop")
+        heading.append("PRICE", style="bold dim")
+        heading.append(" " * max(2, label_width - len("PRICE") + 2))
+        heading.append(
+            f"{TIME_RANGES[snapshot.period].label}  ·  "
+            f"{len(snapshot.prices):,} points",
             style="dim",
         )
+        lines: list[Text] = [heading]
+
+        tick_rows = {
+            0: price_ticks[0],
+            graph_height // 2: price_ticks[1],
+            graph_height - 1: price_ticks[2],
+        }
+        for row_index, row in enumerate(chart_rows):
+            label = tick_rows.get(row_index, "")
+            line = Text(no_wrap=True, overflow="crop")
+            line.append(f"{label[-label_width:]:>{label_width}} ", style="dim")
+            line.append("┤" if label else "│", style="cyan")
+            line.append(row, style=color)
+            lines.append(line)
+
+        baseline = Text(no_wrap=True, overflow="crop")
+        baseline.append(" " * (label_width + 1))
+        baseline.append("└" + "─" * plot_width, style="cyan")
+        lines.append(baseline)
+
+        dates = Text(no_wrap=True, overflow="crop")
+        dates.append(" " * (label_width + 2))
+        dates.append(
+            format_x_axis(snapshot.timestamps, snapshot.period, plot_width),
+            style="dim",
+        )
+        lines.append(dates)
+
+        caption = Text(no_wrap=True, overflow="crop")
+        caption.append(" " * (label_width + 2))
+        caption.append("DATE", style="bold dim")
         caption.append("  ·  ")
         caption.append(
-            f"{len(snapshot.prices):,} points",
+            TIME_RANGES[snapshot.period].description,
             style="dim",
         )
         lines.append(caption)

@@ -22,7 +22,7 @@ in both PNG and SVG formats.
 - A clickable watchlist
 - Current price and period change
 - Period open, high, and low
-- A responsive terminal-native price chart
+- A responsive terminal-native chart with price and date axes
 - Cached views for instant navigation
 - Background refreshes that do not freeze the interface
 - Clear loading and data-provider error states
