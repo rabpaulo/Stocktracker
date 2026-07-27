@@ -6,13 +6,16 @@ controls with the mouse, or scroll the dashboard without leaving the terminal.
 
 ## Screenshots
 
+Fresh captures from the running dashboard are stored in [`screenshots/`](screenshots/)
+in both PNG and SVG formats.
+
 ### PETR4 · One day
 
-![StockTracker showing PETR4 market data for one day](examples/stocktracker-petr4-1d.png)
+![StockTracker showing PETR4 market data for one day](screenshots/stocktracker-petr4-1d.png)
 
 ### BTC-USD · One month
 
-![StockTracker showing Bitcoin market data for one month](examples/stocktracker-btc-usd-1m.png)
+![StockTracker showing Bitcoin market data for one month](screenshots/stocktracker-btc-usd-1m.png)
 
 ## What it shows
 
