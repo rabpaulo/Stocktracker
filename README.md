@@ -7,7 +7,7 @@ controls with the mouse, or scroll the dashboard without leaving the terminal.
 ## Screenshots
 
 Fresh captures from the running dashboard are stored in [`screenshots/`](screenshots/)
-in both PNG and SVG formats.
+as PNG files.
 
 ### PETR4 · One day
 
@@ -28,34 +28,55 @@ in both PNG and SVG formats.
 - Clear loading and data-provider error states
 - Colors inherited from your terminal's active ANSI palette
 
-## Installation
+## Run with Docker
+
+[Docker](https://docs.docker.com/get-docker/) is the only host dependency.
+Build the image and open the default watchlist:
 
 ```bash
 git clone https://github.com/rabpaulo/Stocktracker
 cd Stocktracker
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
+docker build -t stocktracker .
+docker run --rm -it stocktracker
 ```
 
-## Run
-
-Open the default watchlist:
+Pass tickers and periods after the image name:
 
 ```bash
-./stocktracker.py
+docker run --rm -it stocktracker AAPL MSFT BTC-USD
+docker run --rm -it stocktracker PETR4 BBAS3 -t 1m
 ```
 
-Start with a custom watchlist or period:
+The included Compose configuration provides the same workflow:
 
 ```bash
-./stocktracker.py AAPL MSFT BTC-USD
-./stocktracker.py PETR4 BBAS3 -t 1m
+docker compose build
+docker compose run --rm stocktracker
+docker compose run --rm stocktracker AAPL MSFT BTC-USD
 ```
 
 Brazilian stock symbols such as `PETR4` and `BOVA11` automatically receive the
 `.SA` suffix. Yahoo symbols that already contain a suffix or separator, such as
 `BTC-USD`, `^BVSP`, and `VALE3.SA`, are preserved.
+
+## Run locally
+
+To run without Docker, install Python 3.10 or newer and create a virtual
+environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 main.py
+```
+
+CLI arguments work the same way:
+
+```bash
+python3 main.py AAPL MSFT BTC-USD
+python3 main.py PETR4 BBAS3 -t 1m
+```
 
 ## Controls
 

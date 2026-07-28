@@ -1,0 +1,7 @@
+services:
+  stocktracker:
+    build:
+      context: .
+    image: stocktracker:local
+    stdin_open: true
+    tty: true
