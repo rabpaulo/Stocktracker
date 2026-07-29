@@ -31,6 +31,7 @@ from textual.widgets import (
     Input,
     ListItem,
     ListView,
+    OptionList,
     Select,
     Static,
     TabbedContent,
@@ -900,6 +901,9 @@ class StockTrackerApp(App[None]):
         Binding("l", "next_period", "Later range"),
         Binding("/", "focus_search", "Search"),
         Binding("a", "add_ticker", "Add"),
+        Binding("i", "focus_wallet_form", "New entry", show=False),
+        Binding("g", "wallet_first_entry", "First entry", show=False),
+        Binding("shift+g", "wallet_last_entry", "Last entry", show=False),
         Binding("escape", "cancel_search", "Back", show=False),
     ]
 
@@ -1410,7 +1414,8 @@ class StockTrackerApp(App[None]):
                 with VerticalScroll(id="wallet-dashboard"):
                     yield Static("WALLET", id="wallet-heading")
                     yield Static(
-                        "Values use recorded prices without currency conversion.",
+                        "Values use recorded prices without currency conversion.  "
+                        "i form · j/k entries · g/G bounds · Esc log",
                         id="wallet-status",
                     )
                     with Horizontal(id="wallet-form"):
@@ -1579,7 +1584,7 @@ class StockTrackerApp(App[None]):
         self._render_wallet()
         self.query_one("#wallet-quantity", Input).value = ""
         self.query_one("#wallet-price", Input).value = ""
-        self.query_one("#wallet-quantity", Input).focus()
+        self.query_one("#wallet-table", DataTable).focus()
         self._set_wallet_status(
             f"{entry.side.title()} logged · {entry.quantity:g} "
             f"{short_ticker(entry.ticker)} at {format_wallet_amount(entry.price)}"
@@ -1743,11 +1748,17 @@ class StockTrackerApp(App[None]):
         if event.input.id == "search":
             self.search_ticker(event.value)
         elif event.input.id == "wallet-ticker":
-            self.query_one("#wallet-quantity", Input).focus()
+            self.query_one("#wallet-side", Select).focus()
         elif event.input.id == "wallet-quantity":
             self.query_one("#wallet-price", Input).focus()
         elif event.input.id == "wallet-price":
             self.log_wallet_entry()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Continue through the wallet form after choosing a transaction type."""
+
+        if event.select.id == "wallet-side" and event.select.has_focus:
+            self.query_one("#wallet-quantity", Input).focus()
 
     def _normalize_search_value(self, value: str) -> str | None:
         try:
@@ -1855,6 +1866,50 @@ class StockTrackerApp(App[None]):
         index = PERIOD_KEYS.index(self.current_period)
         self.select_period(PERIOD_KEYS[(index + amount) % len(PERIOD_KEYS)])
 
+    def _move_wallet_cursor(self, amount: int) -> None:
+        """Move through wallet controls using Vim's vertical keys."""
+
+        focused = self.focused
+        if isinstance(focused, OptionList):
+            if amount > 0:
+                focused.action_cursor_down()
+            else:
+                focused.action_cursor_up()
+            return
+
+        side = self.query_one("#wallet-side", Select)
+        if focused is side:
+            side.action_show_overlay()
+            overlay = side.query_one(OptionList)
+            if amount > 0:
+                overlay.action_cursor_down()
+            else:
+                overlay.action_cursor_up()
+            return
+
+        table = self.query_one("#wallet-table", DataTable)
+        table.focus()
+        if amount > 0:
+            table.action_cursor_down()
+        else:
+            table.action_cursor_up()
+
+    def _jump_wallet_cursor(self, *, last: bool) -> None:
+        """Focus the wallet log and jump to one of its bounds."""
+
+        focused = self.focused
+        if isinstance(focused, OptionList):
+            if last:
+                focused.action_last()
+            else:
+                focused.action_first()
+            return
+
+        table = self.query_one("#wallet-table", DataTable)
+        table.focus()
+        if table.row_count:
+            table.move_cursor(row=table.row_count - 1 if last else 0)
+
     def action_reload(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
             self._render_wallet()
@@ -1865,10 +1920,14 @@ class StockTrackerApp(App[None]):
     def action_next_ticker(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "market-tab":
             self._move_ticker(1)
+        else:
+            self._move_wallet_cursor(1)
 
     def action_previous_ticker(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "market-tab":
             self._move_ticker(-1)
+        else:
+            self._move_wallet_cursor(-1)
 
     def action_previous_period(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "market-tab":
@@ -1900,14 +1959,27 @@ class StockTrackerApp(App[None]):
         ticker_input = self.query_one("#wallet-ticker", Input)
         if not ticker_input.value:
             ticker_input.value = short_ticker(self.current_ticker)
-        ticker_input.focus()
+        wallet_table = self.query_one("#wallet-table", DataTable)
+        wallet_table.focus()
+        if wallet_table.row_count:
+            wallet_table.move_cursor(row=0)
+
+    def action_focus_wallet_form(self) -> None:
+        if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
+            self.query_one("#wallet-ticker", Input).focus()
+
+    def action_wallet_first_entry(self) -> None:
+        if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
+            self._jump_wallet_cursor(last=False)
+
+    def action_wallet_last_entry(self) -> None:
+        if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
+            self._jump_wallet_cursor(last=True)
 
     def action_cancel_search(self) -> None:
         tabs = self.query_one("#main-tabs", TabbedContent)
         if tabs.active == "wallet-tab":
-            self.query_one("#wallet-ticker", Input).value = ""
-            self.query_one("#wallet-quantity", Input).value = ""
-            self.query_one("#wallet-price", Input).value = ""
+            self.query_one("#wallet-table", DataTable).focus()
         else:
             self.query_one("#search", Input).value = ""
             self.query_one("#ticker-list", ListView).focus()

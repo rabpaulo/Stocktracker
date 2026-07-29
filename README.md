@@ -71,6 +71,11 @@ ticker, a **Buy** or **Sell** type, quantity, and execution price. Entries are
 saved to the `wallet_entries` list in the same configuration file, so they remain
 available after a local or Compose restart.
 
+The Wallet tab starts in navigation mode. Press `j` / `k` to move through the
+entry log, `g` / `G` to jump to its first / last row, and `i` to edit a new
+entry. `Enter` advances through the form; `Esc` returns to the log without
+discarding the current form values.
+
 The wallet calculates open positions using weighted-average cost, prevents sales
 larger than the recorded position, and shows:
 
@@ -156,11 +161,14 @@ python3 main.py PETR4 BBAS3 -t 1m
 | `1` / `2` | Open the Market / Wallet tab |
 | `j` / `k` | Select the next / previous ticker |
 | `l` / `h` | Select the next / previous period |
+| `i` | Edit a new Wallet entry |
+| `j` / `k` (Wallet) | Select the next / previous entry |
+| `g` / `G` (Wallet) | Jump to the first / last entry |
 | `/` | Focus ticker search |
 | `Enter` / **Search** | Open the entered ticker without changing the watchlist |
 | `a` / **Add** | Save the searched ticker to the configuration and watchlist |
 | `r` | Reload the selected ticker and period |
-| `Esc` | Leave search and return to the watchlist |
+| `Esc` | Leave editing and return to the current list |
 | `q` | Quit |
 
 The footer is also clickable in terminals with mouse reporting enabled.
