@@ -2,7 +2,9 @@
   "tickers": [
     "PETR4.SA",
     "BBAS3.SA",
-    "BTC-USD"
+    "BTC-USD",
+    "BBDC4F.SA",
+    "WEGE3.SA"
   ],
   "wallet_entries": []
 }

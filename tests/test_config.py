@@ -100,6 +100,28 @@ class ConfigStoreTests(unittest.TestCase):
                 {"tickers": ["PETR4.SA", "AAPL"]},
             )
 
+    def test_add_ticker_supports_a_non_writable_bind_mount_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.make_config(directory, {"tickers": ["PETR4.SA"]})
+            store = ConfigStore(path)
+            temporary_path = str(path.parent / f".{path.name}.temporary")
+
+            with patch(
+                "main.NamedTemporaryFile",
+                side_effect=PermissionError(
+                    errno.EACCES,
+                    "Permission denied",
+                    temporary_path,
+                ),
+            ):
+                changed = store.add_ticker("AAPL")
+
+            self.assertTrue(changed)
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")),
+                {"tickers": ["PETR4.SA", "AAPL"]},
+            )
+
     def test_empty_watchlist_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self.make_config(directory, {"tickers": []})

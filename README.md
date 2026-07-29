@@ -40,11 +40,17 @@ Build the image and open the default watchlist:
 git clone https://github.com/rabpaulo/Stocktracker
 cd Stocktracker
 docker build -t stocktracker .
-docker run --rm -it stocktracker
+docker run --rm -it \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp \
+  --volume "$PWD/stocktracker.json:/app/stocktracker.json" \
+  stocktracker
 ```
 
-The default watchlist comes from [`stocktracker.json`](stocktracker.json). Edit
-the `tickers` list to add or remove symbols without changing `main.py`:
+The bind mount keeps watchlist and wallet changes in
+[`stocktracker.json`](stocktracker.json) after the container exits. Running the
+image without this mount stores changes only in that one container. Edit the
+`tickers` list to add or remove symbols without changing `main.py`:
 
 ```json
 {

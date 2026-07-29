@@ -387,15 +387,23 @@ class ConfigStore:
         payload = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
         temporary_path: Path | None = None
         try:
-            with NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=self.path.parent,
-                prefix=f".{self.path.name}.",
-                delete=False,
-            ) as temporary:
-                temporary.write(payload)
-                temporary_path = Path(temporary.name)
+            try:
+                with NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=self.path.parent,
+                    prefix=f".{self.path.name}.",
+                    delete=False,
+                ) as temporary:
+                    temporary_path = Path(temporary.name)
+                    temporary.write(payload)
+            except OSError as error:
+                # The image's /app directory is not writable by its runtime
+                # user, even when the bind-mounted configuration file is.
+                if error.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):
+                    raise
+                self.path.write_text(payload, encoding="utf-8")
+                return
             os.chmod(temporary_path, stat.S_IMODE(self.path.stat().st_mode))
             try:
                 temporary_path.replace(self.path)
