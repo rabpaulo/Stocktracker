@@ -20,6 +20,7 @@ as PNG files.
 ## What it shows
 
 - A clickable watchlist
+- A watchlist configured outside the source code
 - Current price and period change
 - Period open, high, and low
 - A responsive terminal-native chart with price and date axes
@@ -40,11 +41,38 @@ docker build -t stocktracker .
 docker run --rm -it stocktracker
 ```
 
+The default watchlist comes from [`stocktracker.json`](stocktracker.json). Edit
+the `tickers` list to add or remove symbols without changing `main.py`:
+
+```json
+{
+  "tickers": [
+    "PETR4.SA",
+    "BBAS3.SA",
+    "BTC-USD",
+    "AAPL"
+  ]
+}
+```
+
+The dashboard keeps the search and add actions separate:
+
+- **Search** (or `Enter`) opens a ticker without changing the watchlist.
+- **Add** appends the ticker to this file and keeps it in the watchlist after a
+  restart.
+
 Pass tickers and periods after the image name:
 
 ```bash
 docker run --rm -it stocktracker AAPL MSFT BTC-USD
 docker run --rm -it stocktracker PETR4 BBAS3 -t 1m
+```
+
+Positional tickers override the configured watchlist only for that run. To use a
+different configuration file, pass `--config`:
+
+```bash
+python3 main.py --config ~/my-stocktracker.json
 ```
 
 The included Compose configuration provides the same workflow:
@@ -53,6 +81,25 @@ The included Compose configuration provides the same workflow:
 docker compose build
 docker compose run --rm stocktracker
 docker compose run --rm stocktracker AAPL MSFT BTC-USD
+```
+
+Compose mounts `stocktracker.json` into the container, so edits on the host and
+tickers added through search remain available after the container exits. If your
+host user does not use UID/GID `1000`, provide the IDs when starting Compose:
+
+```bash
+STOCKTRACKER_UID="$(id -u)" STOCKTRACKER_GID="$(id -g)" \
+  docker compose run --rm stocktracker
+```
+
+For the equivalent persistent setup with `docker run`:
+
+```bash
+docker run --rm -it \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp \
+  --volume "$PWD/stocktracker.json:/app/stocktracker.json" \
+  stocktracker
 ```
 
 Brazilian stock symbols such as `PETR4` and `BOVA11` automatically receive the
@@ -87,7 +134,8 @@ python3 main.py PETR4 BBAS3 -t 1m
 | `j` / `k` | Select the next / previous ticker |
 | `l` / `h` | Select the next / previous period |
 | `/` | Focus ticker search |
-| `Enter` | Open the ticker entered in search |
+| `Enter` / **Search** | Open the entered ticker without changing the watchlist |
+| `a` / **Add** | Save the searched ticker to the configuration and watchlist |
 | `r` | Reload the selected ticker and period |
 | `Esc` | Leave search and return to the watchlist |
 | `q` | Quit |

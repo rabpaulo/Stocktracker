@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import errno
+import json
 import math
+import os
 import re
+import stat
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from threading import Thread
 from typing import Sequence
 
@@ -39,7 +45,7 @@ TIME_RANGES: dict[str, TimeRange] = {
     "all": TimeRange("max", "1mo", "ALL", "All available history", "%Y"),
 }
 PERIOD_KEYS = tuple(TIME_RANGES)
-DEFAULT_TICKERS = ("PETR4.SA", "BBAS3.SA", "BTC-USD")
+DEFAULT_CONFIG_PATH = Path(__file__).with_name("stocktracker.json")
 BRAZILIAN_TICKER = re.compile(r"^[A-Z]{4}\d{1,2}$")
 VALID_TICKER = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]{0,19}$")
 BLOCKS = " ▁▂▃▄▅▆▇█"
@@ -92,6 +98,113 @@ def normalize_ticker(value: str) -> str:
     if BRAZILIAN_TICKER.fullmatch(ticker):
         return f"{ticker}.SA"
     return ticker
+
+
+class ConfigError(ValueError):
+    """Raised when the StockTracker configuration cannot be used."""
+
+
+class ConfigStore:
+    """Load and update the JSON configuration used by the watchlist."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path.expanduser().resolve()
+
+    def _read_document(self) -> tuple[dict[str, object], tuple[str, ...]]:
+        try:
+            document = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError as error:
+            raise ConfigError(f"Configuration file not found: {self.path}") from error
+        except OSError as error:
+            raise ConfigError(
+                f"Unable to read configuration file {self.path}: {error}"
+            ) from error
+        except json.JSONDecodeError as error:
+            raise ConfigError(
+                f"Invalid JSON in {self.path} at line {error.lineno}, "
+                f"column {error.colno}: {error.msg}"
+            ) from error
+
+        if not isinstance(document, dict):
+            raise ConfigError(
+                f"Configuration root in {self.path} must be a JSON object."
+            )
+        configured_tickers = document.get("tickers")
+        if not isinstance(configured_tickers, list):
+            raise ConfigError(
+                f'Configuration field "tickers" in {self.path} must be a list.'
+            )
+
+        normalized: list[str] = []
+        for index, value in enumerate(configured_tickers):
+            if not isinstance(value, str):
+                raise ConfigError(
+                    f'Ticker at "tickers[{index}]" in {self.path} must be a string.'
+                )
+            try:
+                ticker = normalize_ticker(value)
+            except ValueError as error:
+                raise ConfigError(
+                    f'Invalid ticker at "tickers[{index}]" in {self.path}: {error}'
+                ) from error
+            if ticker not in normalized:
+                normalized.append(ticker)
+
+        if not normalized:
+            raise ConfigError(
+                f'Configuration field "tickers" in {self.path} cannot be empty.'
+            )
+        return document, tuple(normalized)
+
+    def load_tickers(self) -> tuple[str, ...]:
+        """Return validated, normalized, and de-duplicated configured tickers."""
+
+        _, tickers = self._read_document()
+        return tickers
+
+    def add_ticker(self, ticker: str) -> bool:
+        """Persist a ticker, returning whether the configuration changed."""
+
+        ticker = normalize_ticker(ticker)
+        document, tickers = self._read_document()
+        if ticker in tickers:
+            return False
+
+        configured_tickers = document["tickers"]
+        assert isinstance(configured_tickers, list)
+        configured_tickers.append(ticker)
+        self._write_document(document)
+        return True
+
+    def _write_document(self, document: dict[str, object]) -> None:
+        payload = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+        temporary_path: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.path.parent,
+                prefix=f".{self.path.name}.",
+                delete=False,
+            ) as temporary:
+                temporary.write(payload)
+                temporary_path = Path(temporary.name)
+            os.chmod(temporary_path, stat.S_IMODE(self.path.stat().st_mode))
+            try:
+                temporary_path.replace(self.path)
+            except OSError as error:
+                # A single file bind-mounted by Docker is a mount point and
+                # cannot be atomically replaced, but it can still be written.
+                if error.errno != errno.EBUSY:
+                    raise
+                self.path.write_text(payload, encoding="utf-8")
+        except OSError as error:
+            raise ConfigError(
+                f"Unable to update configuration file {self.path}: {error}"
+            ) from error
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
 
 def short_ticker(ticker: str) -> str:
@@ -429,6 +542,7 @@ class StockTrackerApp(App[None]):
         Binding("h", "previous_period", "Earlier range"),
         Binding("l", "next_period", "Later range"),
         Binding("/", "focus_search", "Search"),
+        Binding("a", "add_ticker", "Add"),
         Binding("escape", "cancel_search", "Back", show=False),
     ]
 
@@ -496,9 +610,9 @@ class StockTrackerApp(App[None]):
     #search {
         width: 1fr;
         min-width: 24;
-        max-width: 36;
+        max-width: 30;
         height: 3;
-        margin-right: 2;
+        margin-right: 1;
         border: tall ansi_bright_black;
         background: ansi_default;
         color: ansi_default;
@@ -506,6 +620,26 @@ class StockTrackerApp(App[None]):
 
     #search:focus {
         border: tall ansi_cyan;
+    }
+
+    #search-button {
+        width: 10;
+        min-width: 10;
+        height: 3;
+        margin-right: 1;
+        background: ansi_default;
+        color: ansi_cyan;
+        border: tall ansi_cyan;
+    }
+
+    #add-button {
+        width: 8;
+        min-width: 8;
+        height: 3;
+        margin-right: 2;
+        background: ansi_default;
+        color: ansi_green;
+        border: tall ansi_green;
     }
 
     .period-button {
@@ -653,9 +787,10 @@ class StockTrackerApp(App[None]):
 
     def __init__(
         self,
-        tickers: Sequence[str] = DEFAULT_TICKERS,
+        tickers: Sequence[str],
         period: str = "1d",
         service: StockService | None = None,
+        config_store: ConfigStore | None = None,
     ) -> None:
         # Preserve the user's terminal-defined ANSI palette instead of
         # converting ANSI colors to Textual's built-in truecolor theme.
@@ -664,11 +799,12 @@ class StockTrackerApp(App[None]):
             raise ValueError(f"Unknown period: {period}")
         normalized = list(dict.fromkeys(normalize_ticker(ticker) for ticker in tickers))
         if not normalized:
-            normalized = list(DEFAULT_TICKERS)
+            raise ValueError("At least one ticker is required.")
         self.portfolio = normalized
         self.current_ticker = normalized[0]
         self.current_period = period
         self.service = service or StockService()
+        self.config_store = config_store
         self.cache: dict[tuple[str, str], StockSnapshot] = {}
         self._load_generation = 0
 
@@ -678,10 +814,12 @@ class StockTrackerApp(App[None]):
             with Horizontal(id="toolbar"):
                 yield Static("◈  STOCKTRACKER", id="brand")
                 yield Input(
-                    placeholder="/  Search ticker (PETR4, AAPL, BTC-USD)",
+                    placeholder="/  Ticker (PETR4, AAPL, BTC-USD)",
                     id="search",
                     max_length=20,
                 )
+                yield Button("Search", id="search-button", flat=True)
+                yield Button("Add", id="add-button", flat=True)
                 for key, options in TIME_RANGES.items():
                     classes = "period-button active-period" if key == self.current_period else "period-button"
                     yield Button(options.label, id=f"period-{key}", classes=classes, flat=True)
@@ -694,7 +832,7 @@ class StockTrackerApp(App[None]):
                         id="ticker-list",
                         initial_index=0,
                     )
-                    yield Static("Click a ticker\nor use j / k", id="watchlist-help")
+                    yield Static("Search views only\nAdd saves ticker", id="watchlist-help")
                 with VerticalScroll(id="dashboard"):
                     yield Static("", id="status")
                     with Horizontal(id="summary"):
@@ -872,26 +1010,83 @@ class StockTrackerApp(App[None]):
             self.activate_ticker(event.item.ticker)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.search_ticker(event.value)
+
+    def _normalize_search_value(self, value: str) -> str | None:
         try:
-            ticker = normalize_ticker(event.value)
+            return normalize_ticker(value)
         except ValueError as error:
             self._set_status(str(error), error=True)
             self.notify(str(error), severity="error")
+            return None
+
+    def search_ticker(self, value: str) -> None:
+        """Open a ticker without changing the configured watchlist."""
+
+        ticker = self._normalize_search_value(value)
+        if ticker is None:
             return
 
+        ticker_list = self.query_one("#ticker-list", ListView)
+        self.current_ticker = ticker
+        if ticker in self.portfolio:
+            ticker_list.index = self.portfolio.index(ticker)
+            ticker_list.focus()
+        else:
+            ticker_list.index = None
+            self.query_one("#refresh-button", Button).focus()
+        self.query_one("#search", Input).value = ticker
+        self.request_snapshot()
         if ticker not in self.portfolio:
+            self.notify(f"Viewing {ticker}. Select Add to save it.")
+
+    async def add_ticker_to_watchlist(self, value: str) -> None:
+        """Persist a ticker and select it in the watchlist."""
+
+        ticker = self._normalize_search_value(value)
+        if ticker is None:
+            return
+        if self.config_store is None:
+            message = "A configuration file is required to add tickers."
+            self._set_status(message, error=True)
+            self.notify(message, severity="error")
+            return
+
+        try:
+            config_changed = self.config_store.add_ticker(ticker)
+        except ConfigError as error:
+            message = str(error)
+            self._set_status(message, error=True)
+            self.notify(message, severity="error")
+            return
+
+        portfolio_changed = ticker not in self.portfolio
+        if portfolio_changed:
             self.portfolio.append(ticker)
             await self.query_one("#ticker-list", ListView).append(TickerListItem(ticker))
+
         index = self.portfolio.index(ticker)
         ticker_list = self.query_one("#ticker-list", ListView)
         self.current_ticker = ticker
         ticker_list.index = index
         ticker_list.focus()
-        event.input.value = ""
+        self.query_one("#search", Input).value = ""
         self.request_snapshot()
+        if config_changed or portfolio_changed:
+            self.notify(f"{ticker} added to {self.config_store.path.name}.")
+        else:
+            self.notify(f"{ticker} is already in the watchlist.")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
+        if button_id == "search-button":
+            self.search_ticker(self.query_one("#search", Input).value)
+            return
+        if button_id == "add-button":
+            await self.add_ticker_to_watchlist(
+                self.query_one("#search", Input).value
+            )
+            return
         if button_id == "refresh-button":
             self.request_snapshot(force=True)
             return
@@ -906,8 +1101,11 @@ class StockTrackerApp(App[None]):
         self.request_snapshot()
 
     def _move_ticker(self, amount: int) -> None:
-        index = self.portfolio.index(self.current_ticker)
-        index = (index + amount) % len(self.portfolio)
+        if self.current_ticker in self.portfolio:
+            index = self.portfolio.index(self.current_ticker)
+            index = (index + amount) % len(self.portfolio)
+        else:
+            index = 0 if amount > 0 else len(self.portfolio) - 1
         ticker_list = self.query_one("#ticker-list", ListView)
         ticker_list.index = index
         ticker_list.focus()
@@ -937,6 +1135,11 @@ class StockTrackerApp(App[None]):
         search.value = ""
         search.focus()
 
+    async def action_add_ticker(self) -> None:
+        await self.add_ticker_to_watchlist(
+            self.query_one("#search", Input).value
+        )
+
     def action_cancel_search(self) -> None:
         self.query_one("#search", Input).value = ""
         self.query_one("#ticker-list", ListView).focus()
@@ -950,7 +1153,7 @@ def build_parser() -> argparse.ArgumentParser:
         "tickers",
         nargs="*",
         metavar="TICKER",
-        help="initial watchlist (default: PETR4.SA BBAS3.SA BTC-USD)",
+        help="initial watchlist (overrides the configured tickers for this run)",
     )
     parser.add_argument(
         "-t",
@@ -959,15 +1162,29 @@ def build_parser() -> argparse.ArgumentParser:
         default="1d",
         help="initial chart period (default: 1d)",
     )
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        metavar="PATH",
+        help=f"JSON configuration file (default: {DEFAULT_CONFIG_PATH.name})",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    tickers = args.tickers or DEFAULT_TICKERS
     try:
-        app = StockTrackerApp(tickers=tickers, period=args.time)
-    except ValueError as error:
+        config_store = ConfigStore(args.config)
+        configured_tickers = config_store.load_tickers()
+        tickers = args.tickers or configured_tickers
+        app = StockTrackerApp(
+            tickers=tickers,
+            period=args.time,
+            config_store=config_store,
+        )
+    except (ConfigError, ValueError) as error:
         raise SystemExit(f"stocktracker: {error}") from error
     app.run()
 

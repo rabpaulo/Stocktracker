@@ -3,5 +3,10 @@ services:
     build:
       context: .
     image: stocktracker:local
+    user: "${STOCKTRACKER_UID:-1000}:${STOCKTRACKER_GID:-1000}"
+    environment:
+      HOME: /tmp
+    volumes:
+      - ./stocktracker.json:/app/stocktracker.json
     stdin_open: true
     tty: true
