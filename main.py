@@ -23,7 +23,19 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import Button, Footer, Header, Input, ListItem, ListView, Static
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    ListItem,
+    ListView,
+    Select,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +80,32 @@ class StockSnapshot:
     fetched_at: datetime
 
 
+@dataclass(frozen=True)
+class WalletEntry:
+    """A persisted wallet purchase or sale."""
+
+    ticker: str
+    side: str
+    quantity: float
+    price: float
+    occurred_at: datetime
+
+    @property
+    def total(self) -> float:
+        return self.quantity * self.price
+
+
+@dataclass(frozen=True)
+class WalletPosition:
+    """An open position calculated with weighted-average cost."""
+
+    ticker: str
+    quantity: float
+    average_cost: float
+    cost_basis: float
+    realized_profit: float
+
+
 class SnapshotLoaded(Message):
     """Thread-safe handoff from the quote worker to the UI."""
 
@@ -98,6 +136,98 @@ def normalize_ticker(value: str) -> str:
     if BRAZILIAN_TICKER.fullmatch(ticker):
         return f"{ticker}.SA"
     return ticker
+
+
+def parse_positive_number(value: str, label: str) -> float:
+    """Parse a positive finite number from a wallet form field."""
+
+    candidate = value.strip()
+    if not candidate:
+        raise ValueError(f"Enter a {label.lower()}.")
+    if "," in candidate and "." not in candidate:
+        candidate = candidate.replace(",", ".")
+    try:
+        number = float(candidate)
+    except ValueError as error:
+        raise ValueError(f"{label} must be a number.") from error
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{label} must be greater than zero.")
+    return number
+
+
+def make_wallet_entry(
+    ticker: str,
+    side: str,
+    quantity: float,
+    price: float,
+    occurred_at: datetime | None = None,
+) -> WalletEntry:
+    """Validate and construct a wallet entry."""
+
+    normalized_side = side.strip().lower()
+    if normalized_side not in {"buy", "sell"}:
+        raise ValueError('Transaction type must be "buy" or "sell".')
+    if not math.isfinite(quantity) or quantity <= 0:
+        raise ValueError("Quantity must be greater than zero.")
+    if not math.isfinite(price) or price <= 0:
+        raise ValueError("Price must be greater than zero.")
+    timestamp = occurred_at or datetime.now().astimezone()
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.astimezone()
+    return WalletEntry(
+        ticker=normalize_ticker(ticker),
+        side=normalized_side,
+        quantity=float(quantity),
+        price=float(price),
+        occurred_at=timestamp,
+    )
+
+
+def calculate_wallet_positions(
+    entries: Sequence[WalletEntry],
+) -> tuple[WalletPosition, ...]:
+    """Calculate open positions and realized profit in entry order."""
+
+    positions: dict[str, list[float]] = {}
+    order: list[str] = []
+    for entry in entries:
+        if entry.ticker not in positions:
+            positions[entry.ticker] = [0.0, 0.0, 0.0]
+            order.append(entry.ticker)
+        quantity, cost_basis, realized_profit = positions[entry.ticker]
+        if entry.side == "buy":
+            quantity += entry.quantity
+            cost_basis += entry.total
+        else:
+            if entry.quantity > quantity + 1e-9:
+                raise ValueError(
+                    f"Cannot sell {entry.quantity:g} {short_ticker(entry.ticker)}; "
+                    f"only {quantity:g} held."
+                )
+            average_cost = cost_basis / quantity if quantity else 0.0
+            quantity -= entry.quantity
+            cost_basis -= average_cost * entry.quantity
+            realized_profit += (entry.price - average_cost) * entry.quantity
+            if math.isclose(quantity, 0.0, abs_tol=1e-9):
+                quantity = 0.0
+                cost_basis = 0.0
+        positions[entry.ticker] = [quantity, cost_basis, realized_profit]
+
+    return tuple(
+        WalletPosition(
+            ticker=ticker,
+            quantity=positions[ticker][0],
+            average_cost=(
+                positions[ticker][1] / positions[ticker][0]
+                if positions[ticker][0]
+                else 0.0
+            ),
+            cost_basis=positions[ticker][1],
+            realized_profit=positions[ticker][2],
+        )
+        for ticker in order
+        if positions[ticker][0] > 0 or not math.isclose(positions[ticker][2], 0.0)
+    )
 
 
 class ConfigError(ValueError):
@@ -175,6 +305,82 @@ class ConfigStore:
         configured_tickers.append(ticker)
         self._write_document(document)
         return True
+
+    def load_wallet_entries(self) -> tuple[WalletEntry, ...]:
+        """Return validated wallet entries from the configuration."""
+
+        document, _ = self._read_document()
+        raw_entries = document.get("wallet_entries", [])
+        if not isinstance(raw_entries, list):
+            raise ConfigError(
+                f'Configuration field "wallet_entries" in {self.path} must be a list.'
+            )
+
+        entries: list[WalletEntry] = []
+        for index, raw_entry in enumerate(raw_entries):
+            if not isinstance(raw_entry, dict):
+                raise ConfigError(
+                    f'Entry at "wallet_entries[{index}]" in {self.path} '
+                    "must be an object."
+                )
+            try:
+                ticker_value = raw_entry["ticker"]
+                side_value = raw_entry["side"]
+                quantity_value = raw_entry["quantity"]
+                price_value = raw_entry["price"]
+                timestamp_value = raw_entry["occurred_at"]
+                if not isinstance(ticker_value, str):
+                    raise ValueError("ticker must be a string.")
+                if not isinstance(side_value, str):
+                    raise ValueError("side must be a string.")
+                if (
+                    isinstance(quantity_value, bool)
+                    or not isinstance(quantity_value, (int, float))
+                ):
+                    raise ValueError("quantity must be a number.")
+                if (
+                    isinstance(price_value, bool)
+                    or not isinstance(price_value, (int, float))
+                ):
+                    raise ValueError("price must be a number.")
+                if not isinstance(timestamp_value, str):
+                    raise ValueError("occurred_at must be a string.")
+                timestamp = datetime.fromisoformat(timestamp_value)
+                entry = make_wallet_entry(
+                    ticker=ticker_value,
+                    side=side_value,
+                    quantity=float(quantity_value),
+                    price=float(price_value),
+                    occurred_at=timestamp,
+                )
+                calculate_wallet_positions((*entries, entry))
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConfigError(
+                    f'Invalid entry at "wallet_entries[{index}]" in '
+                    f"{self.path}: {error}"
+                ) from error
+            entries.append(entry)
+        return tuple(entries)
+
+    def add_wallet_entry(self, entry: WalletEntry) -> None:
+        """Append a validated wallet entry to the configuration."""
+
+        document, _ = self._read_document()
+        raw_entries = document.setdefault("wallet_entries", [])
+        if not isinstance(raw_entries, list):
+            raise ConfigError(
+                f'Configuration field "wallet_entries" in {self.path} must be a list.'
+            )
+        raw_entries.append(
+            {
+                "ticker": entry.ticker,
+                "side": entry.side,
+                "quantity": entry.quantity,
+                "price": entry.price,
+                "occurred_at": entry.occurred_at.isoformat(),
+            }
+        )
+        self._write_document(document)
 
     def _write_document(self, document: dict[str, object]) -> None:
         payload = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
@@ -350,6 +556,43 @@ def format_x_axis(
             canvas[cell] = character
             occupied[cell] = True
     return "".join(canvas)
+
+
+def format_wallet_x_axis(timestamps: Sequence[datetime], width: int) -> str:
+    """Position transaction dates across a wallet chart axis."""
+
+    if not timestamps:
+        return " " * max(0, width)
+    span = timestamps[-1] - timestamps[0]
+    date_format = "%H:%M" if span.days < 1 else ("%d %b" if span.days < 366 else "%b %Y")
+    canvas = [" "] * max(0, width)
+    labels = (
+        (timestamps[0].strftime(date_format), 0),
+        (timestamps[len(timestamps) // 2].strftime(date_format), width // 2),
+        (timestamps[-1].strftime(date_format), width),
+    )
+    occupied = [False] * len(canvas)
+    for index, (label, anchor) in enumerate(labels):
+        label = label[:width]
+        if index == 0:
+            start = 0
+        elif index == len(labels) - 1:
+            start = width - len(label)
+        else:
+            start = max(0, min(width - len(label), anchor - len(label) // 2))
+        cells = range(start, start + len(label))
+        if any(occupied[cell] for cell in cells):
+            continue
+        for cell, character in zip(cells, label):
+            canvas[cell] = character
+            occupied[cell] = True
+    return "".join(canvas)
+
+
+def format_wallet_amount(value: float) -> str:
+    """Format a user-entered wallet value without assuming its currency."""
+
+    return f"{value:,.2f}"
 
 
 class StockService:
@@ -528,6 +771,118 @@ class PriceChart(Static):
         return Group(*lines)
 
 
+class WalletAllocationChart(Static):
+    """Horizontal bars for the cost basis of open positions."""
+
+    positions: tuple[WalletPosition, ...] = ()
+
+    def show_positions(self, positions: Sequence[WalletPosition]) -> None:
+        self.positions = tuple(position for position in positions if position.quantity > 0)
+        self.refresh()
+
+    def render(self) -> Group | Text:
+        if not self.positions:
+            return Text(
+                "OPEN COST BY ASSET\n\nAdd a buy entry to build this plot.",
+                style="dim",
+            )
+
+        available_width = max(16, self.size.width - 4)
+        label_width = min(
+            12,
+            max(len(short_ticker(position.ticker)) for position in self.positions),
+        )
+        value_width = max(
+            len(format_wallet_amount(position.cost_basis))
+            for position in self.positions
+        )
+        bar_width = max(4, available_width - label_width - value_width - 4)
+        largest = max(position.cost_basis for position in self.positions)
+        visible = sorted(
+            self.positions,
+            key=lambda position: position.cost_basis,
+            reverse=True,
+        )[: max(1, self.size.height - 4)]
+
+        lines: list[Text] = [Text("OPEN COST BY ASSET", style="bold dim"), Text()]
+        for position in visible:
+            filled = max(
+                1,
+                round(position.cost_basis / largest * bar_width) if largest else 1,
+            )
+            line = Text(no_wrap=True, overflow="crop")
+            line.append(
+                f"{short_ticker(position.ticker):>{label_width}} ",
+                style="bold",
+            )
+            line.append("█" * filled, style="cyan")
+            line.append("░" * (bar_width - filled), style="bright_black")
+            line.append(
+                f" {format_wallet_amount(position.cost_basis):>{value_width}}",
+                style="dim",
+            )
+            lines.append(line)
+        return Group(*lines)
+
+
+class WalletCashFlowChart(Static):
+    """Cumulative net invested plot derived from wallet entries."""
+
+    entries: tuple[WalletEntry, ...] = ()
+
+    def show_entries(self, entries: Sequence[WalletEntry]) -> None:
+        self.entries = tuple(entries)
+        self.refresh()
+
+    def render(self) -> Group | Text:
+        if not self.entries:
+            return Text(
+                "NET INVESTED OVER TIME\n\nBuy and sell entries will appear here.",
+                style="dim",
+            )
+
+        cumulative = 0.0
+        values: list[float] = []
+        timestamps: list[datetime] = []
+        for entry in self.entries:
+            cumulative += entry.total if entry.side == "buy" else -entry.total
+            values.append(cumulative)
+            timestamps.append(entry.occurred_at)
+
+        available_width = max(20, self.size.width - 4)
+        ticks = (
+            format_wallet_amount(max(values)),
+            format_wallet_amount((max(values) + min(values)) / 2),
+            format_wallet_amount(min(values)),
+        )
+        label_width = min(16, max(len(tick) for tick in ticks))
+        plot_width = max(8, available_width - label_width - 2)
+        graph_height = max(3, self.size.height - 6)
+        rows = render_area_chart(values, plot_width, graph_height)
+        lines: list[Text] = [Text("NET INVESTED OVER TIME", style="bold dim")]
+        tick_rows = {
+            0: ticks[0],
+            graph_height // 2: ticks[1],
+            graph_height - 1: ticks[2],
+        }
+        for row_index, row in enumerate(rows):
+            label = tick_rows.get(row_index, "")
+            line = Text(no_wrap=True, overflow="crop")
+            line.append(f"{label:>{label_width}} ", style="dim")
+            line.append("┤" if label else "│", style="cyan")
+            line.append(row, style="green" if values[-1] >= 0 else "red")
+            lines.append(line)
+        baseline = Text(no_wrap=True, overflow="crop")
+        baseline.append(" " * (label_width + 1))
+        baseline.append("└" + "─" * plot_width, style="cyan")
+        lines.append(baseline)
+        dates = Text(no_wrap=True, overflow="crop")
+        dates.append(" " * (label_width + 2))
+        dates.append(format_wallet_x_axis(timestamps, plot_width), style="dim")
+        lines.append(dates)
+        return Group(*lines)
+
+
 class StockTrackerApp(App[None]):
     """Mouse- and keyboard-driven stock tracker."""
 
@@ -536,6 +891,8 @@ class StockTrackerApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("1", "show_market", "Market"),
+        Binding("2", "show_wallet", "Wallet"),
         Binding("r", "reload", "Reload"),
         Binding("j", "next_ticker", "Next"),
         Binding("k", "previous_ticker", "Previous"),
@@ -590,6 +947,35 @@ class StockTrackerApp(App[None]):
 
     #shell {
         height: 1fr;
+    }
+
+    #main-tabs {
+        height: 1fr;
+    }
+
+    TabPane {
+        padding: 0;
+    }
+
+    Tabs {
+        height: 3;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    Tab {
+        width: 18;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    Tab.-active {
+        color: ansi_cyan;
+        text-style: bold;
+    }
+
+    Underline {
+        color: ansi_cyan;
     }
 
     #toolbar {
@@ -783,6 +1169,152 @@ class StockTrackerApp(App[None]):
         background: ansi_default;
         border: solid ansi_bright_black;
     }
+
+    #wallet-dashboard {
+        height: 1fr;
+        padding: 1 2 2 2;
+        scrollbar-color: ansi_bright_black;
+        scrollbar-background: ansi_default;
+    }
+
+    #wallet-heading {
+        height: 2;
+        color: ansi_default;
+        text-style: bold;
+    }
+
+    #wallet-status {
+        height: 2;
+        color: ansi_default;
+        text-opacity: 65%;
+    }
+
+    #wallet-form {
+        height: 7;
+        padding: 1 1;
+        margin-bottom: 1;
+        border: solid ansi_bright_black;
+        background: ansi_default;
+    }
+
+    #wallet-ticker {
+        width: 1fr;
+        min-width: 12;
+        height: 3;
+        margin-right: 1;
+        border: tall ansi_bright_black;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    #wallet-side {
+        width: 10;
+        min-width: 10;
+        height: 3;
+        margin-right: 1;
+        border: none;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    #wallet-side SelectCurrent {
+        height: 3;
+        min-height: 3;
+        border: tall ansi_bright_black;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    #wallet-quantity {
+        width: 1fr;
+        min-width: 10;
+        height: 3;
+        margin-right: 1;
+        border: tall ansi_bright_black;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    #wallet-price {
+        width: 1fr;
+        min-width: 10;
+        height: 3;
+        margin-right: 1;
+        border: tall ansi_bright_black;
+        background: ansi_default;
+        color: ansi_default;
+    }
+
+    #wallet-ticker:focus,
+    #wallet-quantity:focus,
+    #wallet-price:focus {
+        border: tall ansi_cyan;
+    }
+
+    #wallet-side:focus SelectCurrent {
+        border: tall ansi_cyan;
+    }
+
+    #wallet-entry-button {
+        width: 14;
+        min-width: 14;
+        height: 3;
+        background: ansi_default;
+        color: ansi_green;
+        border: tall ansi_green;
+    }
+
+    #wallet-summary {
+        height: 7;
+        margin-bottom: 1;
+    }
+
+    .wallet-metric {
+        width: 1fr;
+        height: 7;
+        padding: 1 2;
+        margin-right: 1;
+        background: ansi_default;
+        border: solid ansi_bright_black;
+        content-align: left middle;
+    }
+
+    #wallet-realized {
+        margin-right: 0;
+    }
+
+    #wallet-charts {
+        height: 17;
+        margin-bottom: 1;
+    }
+
+    WalletAllocationChart,
+    WalletCashFlowChart {
+        width: 1fr;
+        height: 17;
+        min-width: 28;
+        padding: 1 2;
+        background: ansi_default;
+        border: solid ansi_bright_black;
+    }
+
+    WalletAllocationChart {
+        margin-right: 1;
+    }
+
+    #wallet-log-title {
+        height: 2;
+        color: ansi_default;
+        text-style: bold;
+    }
+
+    #wallet-table {
+        height: 14;
+        min-height: 8;
+        background: ansi_default;
+        color: ansi_default;
+        border: solid ansi_bright_black;
+    }
     """
 
     def __init__(
@@ -791,6 +1323,7 @@ class StockTrackerApp(App[None]):
         period: str = "1d",
         service: StockService | None = None,
         config_store: ConfigStore | None = None,
+        wallet_entries: Sequence[WalletEntry] = (),
     ) -> None:
         # Preserve the user's terminal-defined ANSI palette instead of
         # converting ANSI colors to Textual's built-in truecolor theme.
@@ -805,49 +1338,146 @@ class StockTrackerApp(App[None]):
         self.current_period = period
         self.service = service or StockService()
         self.config_store = config_store
+        self.wallet_entries = list(wallet_entries)
         self.cache: dict[tuple[str, str], StockSnapshot] = {}
         self._load_generation = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Vertical(id="shell"):
-            with Horizontal(id="toolbar"):
-                yield Static("◈  STOCKTRACKER", id="brand")
-                yield Input(
-                    placeholder="/  Ticker (PETR4, AAPL, BTC-USD)",
-                    id="search",
-                    max_length=20,
-                )
-                yield Button("Search", id="search-button", flat=True)
-                yield Button("Add", id="add-button", flat=True)
-                for key, options in TIME_RANGES.items():
-                    classes = "period-button active-period" if key == self.current_period else "period-button"
-                    yield Button(options.label, id=f"period-{key}", classes=classes, flat=True)
-                yield Button("Reload", id="refresh-button", flat=True)
-            with Horizontal(id="content"):
-                with Vertical(id="sidebar"):
-                    yield Static("WATCHLIST", id="watchlist-title")
-                    yield ListView(
-                        *(TickerListItem(ticker) for ticker in self.portfolio),
-                        id="ticker-list",
-                        initial_index=0,
+        with TabbedContent(initial="market-tab", id="main-tabs"):
+            with TabPane("Market", id="market-tab"):
+                with Vertical(id="shell"):
+                    with Horizontal(id="toolbar"):
+                        yield Static("◈  STOCKTRACKER", id="brand")
+                        yield Input(
+                            placeholder="/  Ticker (PETR4, AAPL, BTC-USD)",
+                            id="search",
+                            max_length=20,
+                        )
+                        yield Button("Search", id="search-button", flat=True)
+                        yield Button("Add", id="add-button", flat=True)
+                        for key, options in TIME_RANGES.items():
+                            classes = (
+                                "period-button active-period"
+                                if key == self.current_period
+                                else "period-button"
+                            )
+                            yield Button(
+                                options.label,
+                                id=f"period-{key}",
+                                classes=classes,
+                                flat=True,
+                            )
+                        yield Button("Reload", id="refresh-button", flat=True)
+                    with Horizontal(id="content"):
+                        with Vertical(id="sidebar"):
+                            yield Static("WATCHLIST", id="watchlist-title")
+                            yield ListView(
+                                *(
+                                    TickerListItem(ticker)
+                                    for ticker in self.portfolio
+                                ),
+                                id="ticker-list",
+                                initial_index=0,
+                            )
+                            yield Static(
+                                "Search views only\nAdd saves ticker",
+                                id="watchlist-help",
+                            )
+                        with VerticalScroll(id="dashboard"):
+                            yield Static("", id="status")
+                            with Horizontal(id="summary"):
+                                yield Static("", id="identity")
+                                yield Static("", id="quote")
+                            with Horizontal(id="metrics"):
+                                yield Static(
+                                    "",
+                                    id="metric-open",
+                                    classes="metric-card",
+                                )
+                                yield Static(
+                                    "",
+                                    id="metric-high",
+                                    classes="metric-card",
+                                )
+                                yield Static(
+                                    "",
+                                    id="metric-low",
+                                    classes="metric-card",
+                                )
+                            yield PriceChart(id="price-chart")
+            with TabPane("Wallet", id="wallet-tab"):
+                with VerticalScroll(id="wallet-dashboard"):
+                    yield Static("WALLET", id="wallet-heading")
+                    yield Static(
+                        "Values use recorded prices without currency conversion.",
+                        id="wallet-status",
                     )
-                    yield Static("Search views only\nAdd saves ticker", id="watchlist-help")
-                with VerticalScroll(id="dashboard"):
-                    yield Static("", id="status")
-                    with Horizontal(id="summary"):
-                        yield Static("", id="identity")
-                        yield Static("", id="quote")
-                    with Horizontal(id="metrics"):
-                        yield Static("", id="metric-open", classes="metric-card")
-                        yield Static("", id="metric-high", classes="metric-card")
-                        yield Static("", id="metric-low", classes="metric-card")
-                    yield PriceChart(id="price-chart")
+                    with Horizontal(id="wallet-form"):
+                        yield Input(
+                            placeholder="Ticker",
+                            id="wallet-ticker",
+                            max_length=20,
+                        )
+                        yield Select(
+                            (("Buy", "buy"), ("Sell", "sell")),
+                            value="buy",
+                            allow_blank=False,
+                            id="wallet-side",
+                        )
+                        yield Input(
+                            placeholder="Quantity",
+                            id="wallet-quantity",
+                            type="number",
+                        )
+                        yield Input(
+                            placeholder="Price",
+                            id="wallet-price",
+                            type="number",
+                        )
+                        yield Button(
+                            "Log entry",
+                            id="wallet-entry-button",
+                            flat=True,
+                        )
+                    with Horizontal(id="wallet-summary"):
+                        yield Static(
+                            "",
+                            id="wallet-entry-count",
+                            classes="wallet-metric",
+                        )
+                        yield Static(
+                            "",
+                            id="wallet-open-cost",
+                            classes="wallet-metric",
+                        )
+                        yield Static(
+                            "",
+                            id="wallet-net-invested",
+                            classes="wallet-metric",
+                        )
+                        yield Static(
+                            "",
+                            id="wallet-realized",
+                            classes="wallet-metric",
+                        )
+                    with Horizontal(id="wallet-charts"):
+                        yield WalletAllocationChart(id="wallet-allocation-chart")
+                        yield WalletCashFlowChart(id="wallet-cash-flow-chart")
+                    yield Static("ENTRY LOG", id="wallet-log-title")
+                    yield DataTable(
+                        id="wallet-table",
+                        cursor_type="row",
+                        zebra_stripes=True,
+                    )
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#ticker-list", ListView).focus()
         self._sync_period_buttons()
+        wallet_table = self.query_one("#wallet-table", DataTable)
+        wallet_table.add_columns("Date", "Type", "Ticker", "Quantity", "Price", "Total")
+        self._render_wallet()
         self.request_snapshot()
 
     def _metric(self, label: str, value: str) -> Text:
@@ -855,6 +1485,106 @@ class StockTrackerApp(App[None]):
         text.append(label.upper(), style="bold dim")
         text.append(f"\n{value}", style="bold")
         return text
+
+    def _render_wallet(self) -> None:
+        positions = calculate_wallet_positions(self.wallet_entries)
+        open_positions = tuple(
+            position for position in positions if position.quantity > 0
+        )
+        open_cost = sum(position.cost_basis for position in open_positions)
+        net_invested = sum(
+            entry.total if entry.side == "buy" else -entry.total
+            for entry in self.wallet_entries
+        )
+        realized_profit = sum(position.realized_profit for position in positions)
+
+        self.query_one("#wallet-entry-count", Static).update(
+            self._metric("Entries", f"{len(self.wallet_entries):,}")
+        )
+        self.query_one("#wallet-open-cost", Static).update(
+            self._metric("Open cost", format_wallet_amount(open_cost))
+        )
+        self.query_one("#wallet-net-invested", Static).update(
+            self._metric("Net invested", format_wallet_amount(net_invested))
+        )
+        realized = Text()
+        realized.append("REALIZED P/L", style="bold dim")
+        realized.append(
+            f"\n{format_wallet_amount(realized_profit)}",
+            style=f"bold {'green' if realized_profit >= 0 else 'red'}",
+        )
+        self.query_one("#wallet-realized", Static).update(realized)
+        self.query_one(
+            "#wallet-allocation-chart",
+            WalletAllocationChart,
+        ).show_positions(open_positions)
+        self.query_one(
+            "#wallet-cash-flow-chart",
+            WalletCashFlowChart,
+        ).show_entries(self.wallet_entries)
+
+        table = self.query_one("#wallet-table", DataTable)
+        table.clear()
+        for entry in reversed(self.wallet_entries):
+            side = Text(
+                entry.side.upper(),
+                style=f"bold {'green' if entry.side == 'buy' else 'red'}",
+            )
+            table.add_row(
+                entry.occurred_at.strftime("%Y-%m-%d %H:%M"),
+                side,
+                short_ticker(entry.ticker),
+                f"{entry.quantity:g}",
+                format_wallet_amount(entry.price),
+                format_wallet_amount(entry.total),
+            )
+
+    def _set_wallet_status(self, message: str, *, error: bool = False) -> None:
+        self.query_one("#wallet-status", Static).update(
+            Text(message, style="bold red" if error else "dim")
+        )
+
+    def log_wallet_entry(self) -> None:
+        """Validate, persist, and render a wallet transaction."""
+
+        if self.config_store is None:
+            message = "A configuration file is required to save wallet entries."
+            self._set_wallet_status(message, error=True)
+            self.notify(message, severity="error")
+            return
+
+        try:
+            ticker = self.query_one("#wallet-ticker", Input).value
+            selected_side = self.query_one("#wallet-side", Select).value
+            if not isinstance(selected_side, str):
+                raise ValueError("Choose Buy or Sell.")
+            quantity = parse_positive_number(
+                self.query_one("#wallet-quantity", Input).value,
+                "Quantity",
+            )
+            price = parse_positive_number(
+                self.query_one("#wallet-price", Input).value,
+                "Price",
+            )
+            entry = make_wallet_entry(ticker, selected_side, quantity, price)
+            calculate_wallet_positions((*self.wallet_entries, entry))
+            self.config_store.add_wallet_entry(entry)
+        except (ConfigError, ValueError) as error:
+            message = str(error)
+            self._set_wallet_status(message, error=True)
+            self.notify(message, severity="error")
+            return
+
+        self.wallet_entries.append(entry)
+        self._render_wallet()
+        self.query_one("#wallet-quantity", Input).value = ""
+        self.query_one("#wallet-price", Input).value = ""
+        self.query_one("#wallet-quantity", Input).focus()
+        self._set_wallet_status(
+            f"{entry.side.title()} logged · {entry.quantity:g} "
+            f"{short_ticker(entry.ticker)} at {format_wallet_amount(entry.price)}"
+        )
+        self.notify(f"{entry.side.title()} entry saved.")
 
     def _render_snapshot(self, snapshot: StockSnapshot) -> None:
         identity = Text()
@@ -1010,7 +1740,14 @@ class StockTrackerApp(App[None]):
             self.activate_ticker(event.item.ticker)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.search_ticker(event.value)
+        if event.input.id == "search":
+            self.search_ticker(event.value)
+        elif event.input.id == "wallet-ticker":
+            self.query_one("#wallet-quantity", Input).focus()
+        elif event.input.id == "wallet-quantity":
+            self.query_one("#wallet-price", Input).focus()
+        elif event.input.id == "wallet-price":
+            self.log_wallet_entry()
 
     def _normalize_search_value(self, value: str) -> str | None:
         try:
@@ -1090,6 +1827,9 @@ class StockTrackerApp(App[None]):
         if button_id == "refresh-button":
             self.request_snapshot(force=True)
             return
+        if button_id == "wallet-entry-button":
+            self.log_wallet_entry()
+            return
         if button_id.startswith("period-"):
             self.select_period(button_id.removeprefix("period-"))
 
@@ -1116,33 +1856,61 @@ class StockTrackerApp(App[None]):
         self.select_period(PERIOD_KEYS[(index + amount) % len(PERIOD_KEYS)])
 
     def action_reload(self) -> None:
-        self.request_snapshot(force=True)
+        if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
+            self._render_wallet()
+            self._set_wallet_status("Wallet data refreshed.")
+        else:
+            self.request_snapshot(force=True)
 
     def action_next_ticker(self) -> None:
-        self._move_ticker(1)
+        if self.query_one("#main-tabs", TabbedContent).active == "market-tab":
+            self._move_ticker(1)
 
     def action_previous_ticker(self) -> None:
-        self._move_ticker(-1)
+        if self.query_one("#main-tabs", TabbedContent).active == "market-tab":
+            self._move_ticker(-1)
 
     def action_previous_period(self) -> None:
-        self._move_period(-1)
+        if self.query_one("#main-tabs", TabbedContent).active == "market-tab":
+            self._move_period(-1)
 
     def action_next_period(self) -> None:
-        self._move_period(1)
+        if self.query_one("#main-tabs", TabbedContent).active == "market-tab":
+            self._move_period(1)
 
     def action_focus_search(self) -> None:
+        self.query_one("#main-tabs", TabbedContent).active = "market-tab"
         search = self.query_one("#search", Input)
         search.value = ""
         search.focus()
 
     async def action_add_ticker(self) -> None:
+        if self.query_one("#main-tabs", TabbedContent).active != "market-tab":
+            return
         await self.add_ticker_to_watchlist(
             self.query_one("#search", Input).value
         )
 
-    def action_cancel_search(self) -> None:
-        self.query_one("#search", Input).value = ""
+    def action_show_market(self) -> None:
+        self.query_one("#main-tabs", TabbedContent).active = "market-tab"
         self.query_one("#ticker-list", ListView).focus()
+
+    def action_show_wallet(self) -> None:
+        self.query_one("#main-tabs", TabbedContent).active = "wallet-tab"
+        ticker_input = self.query_one("#wallet-ticker", Input)
+        if not ticker_input.value:
+            ticker_input.value = short_ticker(self.current_ticker)
+        ticker_input.focus()
+
+    def action_cancel_search(self) -> None:
+        tabs = self.query_one("#main-tabs", TabbedContent)
+        if tabs.active == "wallet-tab":
+            self.query_one("#wallet-ticker", Input).value = ""
+            self.query_one("#wallet-quantity", Input).value = ""
+            self.query_one("#wallet-price", Input).value = ""
+        else:
+            self.query_one("#search", Input).value = ""
+            self.query_one("#ticker-list", ListView).focus()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1178,11 +1946,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         config_store = ConfigStore(args.config)
         configured_tickers = config_store.load_tickers()
+        wallet_entries = config_store.load_wallet_entries()
         tickers = args.tickers or configured_tickers
         app = StockTrackerApp(
             tickers=tickers,
             period=args.time,
             config_store=config_store,
+            wallet_entries=wallet_entries,
         )
     except (ConfigError, ValueError) as error:
         raise SystemExit(f"stocktracker: {error}") from error

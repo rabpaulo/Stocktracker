@@ -21,6 +21,8 @@ as PNG files.
 
 - A clickable watchlist
 - A watchlist configured outside the source code
+- A persistent wallet for buy and sell entries
+- Wallet summaries, weighted-average cost, realized profit/loss, and user-data plots
 - Current price and period change
 - Period open, high, and low
 - A responsive terminal-native chart with price and date axes
@@ -51,7 +53,8 @@ the `tickers` list to add or remove symbols without changing `main.py`:
     "BBAS3.SA",
     "BTC-USD",
     "AAPL"
-  ]
+  ],
+  "wallet_entries": []
 }
 ```
 
@@ -60,6 +63,24 @@ The dashboard keeps the search and add actions separate:
 - **Search** (or `Enter`) opens a ticker without changing the watchlist.
 - **Add** appends the ticker to this file and keeps it in the watchlist after a
   restart.
+
+## Wallet
+
+Select the **Wallet** tab (or press `2`) to log a transaction. Each entry has a
+ticker, a **Buy** or **Sell** type, quantity, and execution price. Entries are
+saved to the `wallet_entries` list in the same configuration file, so they remain
+available after a local or Compose restart.
+
+The wallet calculates open positions using weighted-average cost, prevents sales
+larger than the recorded position, and shows:
+
+- Open cost, cumulative net invested, and realized profit/loss
+- An open-cost-by-asset bar plot
+- A cumulative net-invested plot based on the entry timeline
+- A newest-first transaction log
+
+Wallet values use the prices exactly as entered and do not perform currency
+conversion. Keep entries in a common currency when comparing portfolio totals.
 
 Pass tickers and periods after the image name:
 
@@ -83,9 +104,10 @@ docker compose run --rm stocktracker
 docker compose run --rm stocktracker AAPL MSFT BTC-USD
 ```
 
-Compose mounts `stocktracker.json` into the container, so edits on the host and
-tickers added through search remain available after the container exits. If your
-host user does not use UID/GID `1000`, provide the IDs when starting Compose:
+Compose mounts `stocktracker.json` into the container, so edits on the host,
+tickers added through search, and wallet entries remain available after the
+container exits. If your host user does not use UID/GID `1000`, provide the IDs
+when starting Compose:
 
 ```bash
 STOCKTRACKER_UID="$(id -u)" STOCKTRACKER_GID="$(id -g)" \
@@ -131,6 +153,7 @@ python3 main.py PETR4 BBAS3 -t 1m
 | --- | --- |
 | Mouse click | Select a ticker, period, search field, or reload button |
 | Mouse wheel | Scroll the dashboard or watchlist |
+| `1` / `2` | Open the Market / Wallet tab |
 | `j` / `k` | Select the next / previous ticker |
 | `l` / `h` | Select the next / previous period |
 | `/` | Focus ticker search |
