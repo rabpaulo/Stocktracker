@@ -1,6 +1,9 @@
 #!/bin/sh
-docker run --rm -it \
+SCRIPT_PATH=$(readlink -f "$0")
+PROJECT_DIR=$(dirname "$SCRIPT_PATH")
+
+exec docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
-  --volume "$PWD/stocktracker.json:/app/stocktracker.json" \
-  stocktracker
+  --volume "$PROJECT_DIR/config/config.json:/app/config/config.json" \
+  stocktracker "$@"

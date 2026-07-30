@@ -43,14 +43,14 @@ docker build -t stocktracker .
 docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
-  --volume "$PWD/stocktracker.json:/app/stocktracker.json" \
+  --volume "$PWD/config/config.json:/app/config/config.json" \
   stocktracker
 ```
 
 The bind mount keeps watchlist and wallet changes in
-[`stocktracker.json`](stocktracker.json) after the container exits. Running the
-image without this mount stores changes only in that one container. Edit the
-`tickers` list to add or remove symbols without changing `main.py`:
+[`config/config.json`](config/config.json) after the container exits. Running
+the image without this mount stores changes only in that one container. Edit
+the `tickers` list to add or remove symbols without changing `main.py`:
 
 ```json
 {
@@ -115,7 +115,7 @@ docker compose run --rm stocktracker
 docker compose run --rm stocktracker AAPL MSFT BTC-USD
 ```
 
-Compose mounts `stocktracker.json` into the container, so edits on the host,
+Compose mounts `config/config.json` into the container, so edits on the host,
 tickers added through search, and wallet entries remain available after the
 container exits. If your host user does not use UID/GID `1000`, provide the IDs
 when starting Compose:
@@ -131,7 +131,7 @@ For the equivalent persistent setup with `docker run`:
 docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
-  --volume "$PWD/stocktracker.json:/app/stocktracker.json" \
+  --volume "$PWD/config/config.json:/app/config/config.json" \
   stocktracker
 ```
 
@@ -150,6 +150,8 @@ source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 python3 main.py
 ```
+
+By default, local runs read and update `config/config.json`.
 
 CLI arguments work the same way:
 

@@ -58,7 +58,7 @@ TIME_RANGES: dict[str, TimeRange] = {
     "all": TimeRange("max", "1mo", "ALL", "All available history", "%Y"),
 }
 PERIOD_KEYS = tuple(TIME_RANGES)
-DEFAULT_CONFIG_PATH = Path(__file__).with_name("stocktracker.json")
+DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 BRAZILIAN_TICKER = re.compile(r"^[A-Z]{4}\d{1,2}$")
 VALID_TICKER = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]{0,19}$")
 BLOCKS = " ▁▂▃▄▅▆▇█"
@@ -2016,7 +2016,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_CONFIG_PATH,
         metavar="PATH",
-        help=f"JSON configuration file (default: {DEFAULT_CONFIG_PATH.name})",
+        help="JSON configuration file (default: config/config.json)",
     )
     return parser
 

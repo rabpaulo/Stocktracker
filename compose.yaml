@@ -7,6 +7,6 @@ services:
     environment:
       HOME: /tmp
     volumes:
-      - ./stocktracker.json:/app/stocktracker.json
+      - ./config/config.json:/app/config/config.json
     stdin_open: true
     tty: true
