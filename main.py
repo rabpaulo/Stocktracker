@@ -126,6 +126,25 @@ class SnapshotLoaded(Message):
         self.error = error
 
 
+class WalletQuotesLoaded(Message):
+    """Thread-safe handoff of Yahoo prices for open wallet positions."""
+
+    def __init__(
+        self,
+        tickers: Sequence[str],
+        generation: int,
+        prices: dict[str, float],
+        errors: dict[str, str],
+        fetched_at: datetime,
+    ) -> None:
+        super().__init__()
+        self.tickers = tuple(tickers)
+        self.generation = generation
+        self.prices = prices
+        self.errors = errors
+        self.fetched_at = fetched_at
+
+
 def normalize_ticker(value: str) -> str:
     """Normalize a search term to a Yahoo Finance ticker."""
 
@@ -892,6 +911,18 @@ class WalletCashFlowChart(Static):
         return Group(*lines)
 
 
+class WalletSideSelect(Select[str]):
+    """Transaction-side selector that submits its current value with Enter."""
+
+    BINDINGS = [Binding("enter", "submit", "Continue", show=False)]
+
+    class Submitted(Message):
+        """The current side was confirmed without needing to change it."""
+
+    def action_submit(self) -> None:
+        self.post_message(self.Submitted())
+
+
 class StockTrackerApp(App[None]):
     """Mouse- and keyboard-driven stock tracker."""
 
@@ -1291,8 +1322,23 @@ class StockTrackerApp(App[None]):
         content-align: left middle;
     }
 
-    #wallet-realized {
+    #wallet-unrealized {
         margin-right: 0;
+    }
+
+    #wallet-positions-title {
+        height: 2;
+        color: ansi_default;
+        text-style: bold;
+    }
+
+    #wallet-positions-table {
+        height: 10;
+        min-height: 6;
+        margin-bottom: 1;
+        background: ansi_default;
+        color: ansi_default;
+        border: solid ansi_bright_black;
     }
 
     #wallet-charts {
@@ -1352,7 +1398,11 @@ class StockTrackerApp(App[None]):
         self.config_store = config_store
         self.wallet_entries = list(wallet_entries)
         self.cache: dict[tuple[str, str], StockSnapshot] = {}
+        self.wallet_prices: dict[str, float] = {}
+        self.wallet_price_errors: dict[str, str] = {}
         self._load_generation = 0
+        self._wallet_quote_generation = 0
+        self._wallet_quotes_loading = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -1432,7 +1482,7 @@ class StockTrackerApp(App[None]):
                             id="wallet-ticker",
                             max_length=20,
                         )
-                        yield Select(
+                        yield WalletSideSelect(
                             (("Buy", "buy"), ("Sell", "sell")),
                             value="buy",
                             allow_blank=False,
@@ -1474,6 +1524,20 @@ class StockTrackerApp(App[None]):
                             id="wallet-realized",
                             classes="wallet-metric",
                         )
+                        yield Static(
+                            "",
+                            id="wallet-unrealized",
+                            classes="wallet-metric",
+                        )
+                    yield Static(
+                        "OPEN POSITIONS · YAHOO FINANCE",
+                        id="wallet-positions-title",
+                    )
+                    yield DataTable(
+                        id="wallet-positions-table",
+                        cursor_type="row",
+                        zebra_stripes=True,
+                    )
                     with Horizontal(id="wallet-charts"):
                         yield WalletAllocationChart(id="wallet-allocation-chart")
                         yield WalletCashFlowChart(id="wallet-cash-flow-chart")
@@ -1490,6 +1554,14 @@ class StockTrackerApp(App[None]):
         self._sync_period_buttons()
         wallet_table = self.query_one("#wallet-table", DataTable)
         wallet_table.add_columns("Date", "Type", "Ticker", "Quantity", "Price", "Total")
+        self.query_one("#wallet-positions-table", DataTable).add_columns(
+            "Ticker",
+            "Quantity",
+            "Average price",
+            "Yahoo price",
+            "P/L",
+            "P/L %",
+        )
         self._render_wallet()
         self.request_snapshot()
 
@@ -1527,6 +1599,66 @@ class StockTrackerApp(App[None]):
             style=f"bold {'green' if realized_profit >= 0 else 'red'}",
         )
         self.query_one("#wallet-realized", Static).update(realized)
+
+        quoted_positions = tuple(
+            position
+            for position in open_positions
+            if position.ticker in self.wallet_prices
+        )
+        unrealized_profit = sum(
+            (self.wallet_prices[position.ticker] - position.average_cost)
+            * position.quantity
+            for position in quoted_positions
+        )
+        unrealized = Text()
+        unrealized.append("OPEN P/L", style="bold dim")
+        if len(quoted_positions) == len(open_positions):
+            unrealized.append(
+                f"\n{format_wallet_amount(unrealized_profit)}",
+                style=f"bold {'green' if unrealized_profit >= 0 else 'red'}",
+            )
+        elif self._wallet_quotes_loading:
+            unrealized.append("\nLoading…", style="bold dim")
+        else:
+            unrealized.append("\n—", style="bold dim")
+        self.query_one("#wallet-unrealized", Static).update(unrealized)
+
+        positions_table = self.query_one("#wallet-positions-table", DataTable)
+        positions_table.clear()
+        for position in open_positions:
+            yahoo_price = self.wallet_prices.get(position.ticker)
+            if yahoo_price is None:
+                unavailable = Text(
+                    "Loading…" if self._wallet_quotes_loading else "Unavailable",
+                    style="italic dim",
+                )
+                positions_table.add_row(
+                    short_ticker(position.ticker),
+                    f"{position.quantity:g}",
+                    format_wallet_amount(position.average_cost),
+                    unavailable,
+                    "—",
+                    "—",
+                )
+                continue
+
+            profit = (yahoo_price - position.average_cost) * position.quantity
+            profit_percent = (
+                (yahoo_price / position.average_cost - 1) * 100
+                if position.average_cost
+                else 0.0
+            )
+            direction = "+" if profit >= 0 else ""
+            style = f"bold {'green' if profit >= 0 else 'red'}"
+            positions_table.add_row(
+                short_ticker(position.ticker),
+                f"{position.quantity:g}",
+                format_wallet_amount(position.average_cost),
+                format_wallet_amount(yahoo_price),
+                Text(f"{direction}{format_wallet_amount(profit)}", style=style),
+                Text(f"{direction}{profit_percent:,.2f}%", style=style),
+            )
+
         self.query_one(
             "#wallet-allocation-chart",
             WalletAllocationChart,
@@ -1590,6 +1722,7 @@ class StockTrackerApp(App[None]):
 
         self.wallet_entries.append(entry)
         self._render_wallet()
+        self.request_wallet_quotes(force=True)
         self.query_one("#wallet-quantity", Input).value = ""
         self.query_one("#wallet-price", Input).value = ""
         self.query_one("#wallet-table", DataTable).focus()
@@ -1598,6 +1731,103 @@ class StockTrackerApp(App[None]):
             f"{short_ticker(entry.ticker)} at {format_wallet_amount(entry.price)}"
         )
         self.notify(f"{entry.side.title()} entry saved.")
+
+    def request_wallet_quotes(self, *, force: bool = False) -> None:
+        """Load Yahoo prices for every open wallet position in the background."""
+
+        positions = calculate_wallet_positions(self.wallet_entries)
+        tickers = tuple(
+            position.ticker for position in positions if position.quantity > 0
+        )
+        self._wallet_quote_generation += 1
+
+        if not tickers:
+            self._wallet_quotes_loading = False
+            self.wallet_prices.clear()
+            self.wallet_price_errors.clear()
+            self._render_wallet()
+            self._set_wallet_status("No open positions to price.")
+            return
+
+        if not force and all(ticker in self.wallet_prices for ticker in tickers):
+            self._render_wallet()
+            return
+
+        self._wallet_quotes_loading = True
+        self._render_wallet()
+        self._set_wallet_status(
+            f"Loading Yahoo prices for {len(tickers)} open "
+            f"{'position' if len(tickers) == 1 else 'positions'}…"
+        )
+        generation = self._wallet_quote_generation
+        thread = Thread(
+            target=self.load_wallet_quotes,
+            args=(tickers, generation),
+            name=f"wallet-quotes-{generation}",
+            daemon=True,
+        )
+        thread.start()
+
+    def load_wallet_quotes(
+        self,
+        tickers: Sequence[str],
+        generation: int,
+    ) -> None:
+        """Fetch current wallet prices without blocking Textual's event loop."""
+
+        prices: dict[str, float] = {}
+        errors: dict[str, str] = {}
+        for ticker in tickers:
+            try:
+                snapshot = self.service.fetch(ticker, "1d")
+            except Exception as error:
+                errors[ticker] = str(error)
+            else:
+                prices[ticker] = snapshot.current
+        self.post_message(
+            WalletQuotesLoaded(
+                tickers,
+                generation,
+                prices,
+                errors,
+                datetime.now().astimezone(),
+            )
+        )
+
+    def on_wallet_quotes_loaded(self, event: WalletQuotesLoaded) -> None:
+        if event.generation != self._wallet_quote_generation:
+            return
+
+        self._wallet_quotes_loading = False
+        for ticker in event.tickers:
+            if ticker in event.prices:
+                self.wallet_prices[ticker] = event.prices[ticker]
+                self.wallet_price_errors.pop(ticker, None)
+            else:
+                self.wallet_prices.pop(ticker, None)
+                self.wallet_price_errors[ticker] = event.errors.get(
+                    ticker,
+                    "Yahoo price unavailable.",
+                )
+        self._render_wallet()
+
+        failure_count = len(event.errors)
+        if failure_count == len(event.tickers):
+            self._set_wallet_status(
+                "Yahoo prices are unavailable for all open positions.",
+                error=True,
+            )
+        elif failure_count:
+            self._set_wallet_status(
+                f"Yahoo prices updated {event.fetched_at:%H:%M:%S} · "
+                f"{failure_count} unavailable.",
+                error=True,
+            )
+        else:
+            self._set_wallet_status(
+                f"Yahoo prices updated {event.fetched_at:%H:%M:%S} · "
+                "press r to refresh."
+            )
 
     def _render_snapshot(self, snapshot: StockSnapshot) -> None:
         identity = Text()
@@ -1768,6 +1998,14 @@ class StockTrackerApp(App[None]):
         if event.select.id == "wallet-side" and event.select.has_focus:
             self.query_one("#wallet-quantity", Input).focus()
 
+    def on_wallet_side_select_submitted(
+        self,
+        event: WalletSideSelect.Submitted,
+    ) -> None:
+        """Continue when the already-selected wallet side is confirmed."""
+
+        self.query_one("#wallet-quantity", Input).focus()
+
     def _normalize_search_value(self, value: str) -> str | None:
         try:
             return normalize_ticker(value)
@@ -1920,8 +2158,7 @@ class StockTrackerApp(App[None]):
 
     def action_reload(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
-            self._render_wallet()
-            self._set_wallet_status("Wallet data refreshed.")
+            self.request_wallet_quotes(force=True)
         else:
             self.request_snapshot(force=True)
 
@@ -1971,6 +2208,15 @@ class StockTrackerApp(App[None]):
         wallet_table.focus()
         if wallet_table.row_count:
             wallet_table.move_cursor(row=0)
+
+    def on_tabbed_content_tab_activated(
+        self,
+        event: TabbedContent.TabActivated,
+    ) -> None:
+        """Refresh Yahoo comparisons whenever the Wallet tab is opened."""
+
+        if event.tabbed_content.id == "main-tabs" and event.pane.id == "wallet-tab":
+            self.request_wallet_quotes(force=True)
 
     def action_focus_wallet_form(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":

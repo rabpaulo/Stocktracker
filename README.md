@@ -86,12 +86,16 @@ The wallet calculates open positions using weighted-average cost, prevents sales
 larger than the recorded position, and shows:
 
 - Open cost, cumulative net invested, and realized profit/loss
+- Yahoo Finance prices alongside each position's weighted-average price
+- Unrealized profit/loss in value and percentage for every open position
 - An open-cost-by-asset bar plot
 - A cumulative net-invested plot based on the entry timeline
 - A newest-first transaction log
 
-Wallet values use the prices exactly as entered and do not perform currency
-conversion. Keep entries in a common currency when comparing portfolio totals.
+Recorded wallet values use the prices exactly as entered and do not perform
+currency conversion. Current prices are loaded from Yahoo Finance when the
+Wallet tab opens and when you press `r`. Keep entries in a common currency when
+comparing portfolio totals.
 
 Pass tickers and periods after the image name:
 

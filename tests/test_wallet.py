@@ -95,6 +95,34 @@ class WalletPersistenceTests(unittest.TestCase):
 
 
 class WalletInterfaceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_wallet_compares_average_cost_with_yahoo_price(self) -> None:
+        entry = make_wallet_entry(
+            "AAPL",
+            "buy",
+            2,
+            10,
+            datetime(2026, 7, 29, tzinfo=timezone.utc),
+        )
+        app = StockTrackerApp(
+            ("AAPL",),
+            service=FakeStockService(),
+            wallet_entries=(entry,),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("2")
+            await pilot.pause()
+
+            table = app.query_one("#wallet-positions-table", DataTable)
+            row = table.get_row_at(0)
+
+            self.assertEqual(row[0], "AAPL")
+            self.assertEqual(row[1], "2")
+            self.assertEqual(row[2], "10.00")
+            self.assertEqual(row[3], "11.00")
+            self.assertEqual(row[4].plain, "+2.00")
+            self.assertEqual(row[5].plain, "+10.00%")
+
     async def test_wallet_uses_vim_keys_to_navigate_the_entry_log(self) -> None:
         entries = tuple(
             make_wallet_entry(
@@ -174,6 +202,33 @@ class WalletInterfaceTests(unittest.IsolatedAsyncioTestCase):
                 app.focused,
                 app.query_one("#wallet-quantity", Input),
             )
+
+    async def test_enter_logs_an_entry_with_the_default_buy_side(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "stocktracker.json")
+            path.write_text('{"tickers": ["PETR4.SA"]}\n', encoding="utf-8")
+            store = ConfigStore(path)
+            app = StockTrackerApp(
+                store.load_tickers(),
+                service=FakeStockService(),
+                config_store=store,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.press("2", "i")
+                await pilot.press(*"petr4", "enter", "enter")
+                await pilot.press(*"10", "enter")
+                await pilot.press(*"40.50", "enter")
+                await pilot.pause()
+
+                self.assertEqual(
+                    app.query_one("#wallet-table", DataTable).row_count,
+                    1,
+                )
+
+            saved = store.load_wallet_entries()
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(saved[0].side, "buy")
 
     async def test_wallet_tab_logs_and_renders_a_persistent_buy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
