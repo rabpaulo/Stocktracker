@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import errno
 import json
 import math
@@ -252,6 +253,32 @@ def calculate_wallet_positions(
 
 class ConfigError(ValueError):
     """Raised when the StockTracker configuration cannot be used."""
+
+
+def export_wallet_csv(entries: Sequence[WalletEntry], path: Path) -> Path:
+    """Export wallet transactions to a CSV file and return its resolved path."""
+
+    target = path.expanduser().resolve()
+    try:
+        with target.open("w", encoding="utf-8", newline="") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(
+                ("occurred_at", "ticker", "side", "quantity", "price", "total")
+            )
+            for entry in entries:
+                writer.writerow(
+                    (
+                        entry.occurred_at.isoformat(),
+                        entry.ticker,
+                        entry.side,
+                        format(entry.quantity, ".15g"),
+                        format(entry.price, ".15g"),
+                        format(entry.total, ".15g"),
+                    )
+                )
+    except OSError as error:
+        raise ConfigError(f"Unable to export wallet to {target}: {error}") from error
+    return target
 
 
 class ConfigStore:
@@ -941,6 +968,7 @@ class StockTrackerApp(App[None]):
         Binding("/", "focus_search", "Search"),
         Binding("a", "add_ticker", "Add"),
         Binding("i", "focus_wallet_form", "New entry", show=False),
+        Binding("e", "export_wallet", "Export CSV", show=False),
         Binding("g", "wallet_first_entry", "First entry", show=False),
         Binding("shift+g", "wallet_last_entry", "Last entry", show=False),
         Binding("escape", "cancel_search", "Back", show=False),
@@ -1220,10 +1248,25 @@ class StockTrackerApp(App[None]):
         scrollbar-background: ansi_default;
     }
 
+    #wallet-header {
+        height: 3;
+    }
+
     #wallet-heading {
-        height: 2;
+        width: 1fr;
+        height: 3;
+        content-align: left middle;
         color: ansi_default;
         text-style: bold;
+    }
+
+    #wallet-export-button {
+        width: 16;
+        min-width: 16;
+        height: 3;
+        background: ansi_default;
+        color: ansi_cyan;
+        border: tall ansi_cyan;
     }
 
     #wallet-status {
@@ -1470,10 +1513,16 @@ class StockTrackerApp(App[None]):
                             yield PriceChart(id="price-chart")
             with TabPane("Wallet", id="wallet-tab"):
                 with VerticalScroll(id="wallet-dashboard"):
-                    yield Static("WALLET", id="wallet-heading")
+                    with Horizontal(id="wallet-header"):
+                        yield Static("WALLET", id="wallet-heading")
+                        yield Button(
+                            "Export CSV",
+                            id="wallet-export-button",
+                            flat=True,
+                        )
                     yield Static(
                         "Values use recorded prices without currency conversion.  "
-                        "i form · j/k entries · g/G bounds · Esc log",
+                        "i form · e export · j/k entries · g/G bounds · Esc log",
                         id="wallet-status",
                     )
                     with Horizontal(id="wallet-form"):
@@ -1731,6 +1780,31 @@ class StockTrackerApp(App[None]):
             f"{short_ticker(entry.ticker)} at {format_wallet_amount(entry.price)}"
         )
         self.notify(f"{entry.side.title()} entry saved.")
+
+    def export_wallet(self) -> None:
+        """Export the complete wallet transaction log beside its config file."""
+
+        if self.config_store is None:
+            message = "A configuration file is required to export the wallet."
+            self._set_wallet_status(message, error=True)
+            self.notify(message, severity="error")
+            return
+
+        try:
+            target = export_wallet_csv(
+                self.wallet_entries,
+                self.config_store.path.with_name("wallet.csv"),
+            )
+        except ConfigError as error:
+            message = str(error)
+            self._set_wallet_status(message, error=True)
+            self.notify(message, severity="error")
+            return
+
+        self._set_wallet_status(
+            f"Exported {len(self.wallet_entries):,} entries · {target}"
+        )
+        self.notify(f"Wallet exported to {target}.")
 
     def request_wallet_quotes(self, *, force: bool = False) -> None:
         """Load Yahoo prices for every open wallet position in the background."""
@@ -2087,6 +2161,9 @@ class StockTrackerApp(App[None]):
         if button_id == "wallet-entry-button":
             self.log_wallet_entry()
             return
+        if button_id == "wallet-export-button":
+            self.export_wallet()
+            return
         if button_id.startswith("period-"):
             self.select_period(button_id.removeprefix("period-"))
 
@@ -2221,6 +2298,10 @@ class StockTrackerApp(App[None]):
     def action_focus_wallet_form(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
             self.query_one("#wallet-ticker", Input).focus()
+
+    def action_export_wallet(self) -> None:
+        if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":
+            self.export_wallet()
 
     def action_wallet_first_entry(self) -> None:
         if self.query_one("#main-tabs", TabbedContent).active == "wallet-tab":

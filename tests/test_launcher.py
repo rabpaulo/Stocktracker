@@ -42,7 +42,7 @@ class LauncherTests(unittest.TestCase):
                 ["build", "--tag", "stocktracker:local", str(PROJECT_ROOT)],
             )
             self.assertIn(
-                f"{PROJECT_ROOT / 'config/config.json'}:/app/config/config.json",
+                f"{PROJECT_ROOT / 'config'}:/app/config",
                 arguments[1],
             )
             self.assertEqual(

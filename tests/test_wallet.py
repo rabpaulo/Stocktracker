@@ -1,3 +1,4 @@
+import csv
 import json
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from main import (
     StockTrackerApp,
     WalletEntry,
     calculate_wallet_positions,
+    export_wallet_csv,
     make_wallet_entry,
 )
 from tests.test_config import FakeStockService
@@ -93,8 +95,88 @@ class WalletPersistenceTests(unittest.TestCase):
                 ],
             )
 
+    def test_wallet_entries_are_exported_as_csv(self) -> None:
+        entries = (
+            make_wallet_entry(
+                "petr4",
+                "buy",
+                12.5,
+                38.75,
+                datetime(2026, 7, 29, 12, 30, tzinfo=timezone.utc),
+            ),
+            make_wallet_entry(
+                "petr4",
+                "sell",
+                2.5,
+                42,
+                datetime(2026, 7, 30, 14, 45, tzinfo=timezone.utc),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = export_wallet_csv(entries, Path(directory, "wallet.csv"))
+            with path.open(encoding="utf-8", newline="") as csv_file:
+                rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "occurred_at": "2026-07-29T12:30:00+00:00",
+                    "ticker": "PETR4.SA",
+                    "side": "buy",
+                    "quantity": "12.5",
+                    "price": "38.75",
+                    "total": "484.375",
+                },
+                {
+                    "occurred_at": "2026-07-30T14:45:00+00:00",
+                    "ticker": "PETR4.SA",
+                    "side": "sell",
+                    "quantity": "2.5",
+                    "price": "42",
+                    "total": "105",
+                },
+            ],
+        )
+
 
 class WalletInterfaceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_export_button_writes_wallet_csv_beside_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "stocktracker.json")
+            path.write_text('{"tickers": ["AAPL"]}\n', encoding="utf-8")
+            store = ConfigStore(path)
+            entry = make_wallet_entry(
+                "AAPL",
+                "buy",
+                2,
+                10,
+                datetime(2026, 7, 29, tzinfo=timezone.utc),
+            )
+            app = StockTrackerApp(
+                store.load_tickers(),
+                service=FakeStockService(),
+                config_store=store,
+                wallet_entries=(entry,),
+            )
+            exported = Path(directory, "wallet.csv")
+
+            async with app.run_test() as pilot:
+                await pilot.press("2")
+                await pilot.click("#wallet-export-button")
+                self.assertTrue(exported.exists())
+                exported.unlink()
+                await pilot.press("e")
+                self.assertTrue(exported.exists())
+
+            with exported.open(encoding="utf-8", newline="") as csv_file:
+                rows = list(csv.DictReader(csv_file))
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["ticker"], "AAPL")
+            self.assertEqual(rows[0]["total"], "20")
+
     async def test_wallet_compares_average_cost_with_yahoo_price(self) -> None:
         entry = make_wallet_entry(
             "AAPL",

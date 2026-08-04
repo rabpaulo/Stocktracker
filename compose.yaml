@@ -7,6 +7,6 @@ services:
     environment:
       HOME: /tmp
     volumes:
-      - ./config/config.json:/app/config/config.json
+      - ./config:/app/config
     stdin_open: true
     tty: true

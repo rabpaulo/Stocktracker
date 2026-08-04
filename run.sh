@@ -10,5 +10,5 @@ docker build --tag "$IMAGE" "$PROJECT_DIR"
 exec docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
-  --volume "$PROJECT_DIR/config/config.json:/app/config/config.json" \
+  --volume "$PROJECT_DIR/config:/app/config" \
   "$IMAGE" "$@"

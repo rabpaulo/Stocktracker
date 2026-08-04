@@ -22,6 +22,7 @@ as PNG files.
 - A clickable watchlist
 - A watchlist configured outside the source code
 - A persistent wallet for buy and sell entries
+- CSV export of the complete wallet transaction log
 - Wallet summaries, weighted-average cost, realized profit/loss, and user-data plots
 - Current price and period change
 - Period open, high, and low
@@ -43,14 +44,15 @@ docker build -t stocktracker .
 docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
-  --volume "$PWD/config/config.json:/app/config/config.json" \
+  --volume "$PWD/config:/app/config" \
   stocktracker
 ```
 
 The bind mount keeps watchlist and wallet changes in
-[`config/config.json`](config/config.json) after the container exits. Running
-the image without this mount stores changes only in that one container. Edit
-the `tickers` list to add or remove symbols without changing `main.py`:
+[`config/config.json`](config/config.json), and CSV exports in `config/`, after
+the container exits. Running the image without this mount stores changes only
+in that one container. Edit the `tickers` list to add or remove symbols without
+changing `main.py`:
 
 ```json
 {
@@ -81,6 +83,11 @@ The Wallet tab starts in navigation mode. Press `j` / `k` to move through the
 entry log, `g` / `G` to jump to its first / last row, and `i` to edit a new
 entry. `Enter` advances through the form; `Esc` returns to the log without
 discarding the current form values.
+
+Select **Export CSV** (or press `e` while the Wallet tab is active) to write the
+complete transaction log to `config/wallet.csv`. The export contains the ISO
+timestamp, Yahoo ticker, transaction type, quantity, price, and total. Each
+export replaces the previous file with the latest wallet data.
 
 The wallet calculates open positions using weighted-average cost, prevents sales
 larger than the recorded position, and shows:
@@ -119,10 +126,10 @@ docker compose run --rm stocktracker
 docker compose run --rm stocktracker AAPL MSFT BTC-USD
 ```
 
-Compose mounts `config/config.json` into the container, so edits on the host,
-tickers added through search, and wallet entries remain available after the
-container exits. If your host user does not use UID/GID `1000`, provide the IDs
-when starting Compose:
+Compose mounts the `config/` directory into the container, so edits on the host,
+tickers added through search, wallet entries, and CSV exports remain available
+after the container exits. If your host user does not use UID/GID `1000`,
+provide the IDs when starting Compose:
 
 ```bash
 STOCKTRACKER_UID="$(id -u)" STOCKTRACKER_GID="$(id -g)" \
@@ -135,7 +142,7 @@ For the equivalent persistent setup with `docker run`:
 docker run --rm -it \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
-  --volume "$PWD/config/config.json:/app/config/config.json" \
+  --volume "$PWD/config:/app/config" \
   stocktracker
 ```
 
@@ -174,6 +181,7 @@ python3 main.py PETR4 BBAS3 -t 1m
 | `j` / `k` | Select the next / previous ticker |
 | `l` / `h` | Select the next / previous period |
 | `i` | Edit a new Wallet entry |
+| `e` (Wallet) | Export the wallet transaction log to CSV |
 | `j` / `k` (Wallet) | Select the next / previous entry |
 | `g` / `G` (Wallet) | Jump to the first / last entry |
 | `/` | Focus ticker search |
